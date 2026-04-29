@@ -28,24 +28,29 @@ DNSSEC=yes
 FallbackDNS=
 EOF
 
-# Detect primary interface for resolvectl per-interface settings
-IFACE=$(ip route show default | awk 'NR==1 {print $5}')
-echo "   Primary interface: $IFACE"
-
-# Apply live to running systemd-resolved instance
-resolvectl dns "$IFACE" \
-    "9.9.9.9#dns.quad9.net" \
-    "149.112.112.112#dns.quad9.net" \
-    "2620:fe::fe#dns.quad9.net" \
-    "2620:fe::9#dns.quad9.net"
-resolvectl dnsovertls "$IFACE" yes
-resolvectl dnssec     "$IFACE" yes
+# Restart resolved so the global drop-in takes effect without needing a live interface
+systemctl restart systemd-resolved
 
 # Ensure applications use the stub resolver (127.0.0.53)
 ln -sf /run/systemd/resolved/stub-resolv.conf /etc/resolv.conf
 
-echo "   DNS status:"
-resolvectl status "$IFACE" | grep -E "DNS Server|DNS Over TLS|DNSSEC"
+# Apply per-interface settings live if a default route already exists.
+# Belt-and-suspenders only — the restarted service already has the global config.
+IFACE=$(ip route show default 2>/dev/null | awk 'NR==1 {print $5}')
+if [[ -n "$IFACE" ]]; then
+    echo "   Primary interface: $IFACE"
+    resolvectl dns "$IFACE" \
+        "9.9.9.9#dns.quad9.net" \
+        "149.112.112.112#dns.quad9.net" \
+        "2620:fe::fe#dns.quad9.net" \
+        "2620:fe::9#dns.quad9.net"
+    resolvectl dnsovertls "$IFACE" yes
+    resolvectl dnssec     "$IFACE" yes
+    echo "   DNS status:"
+    resolvectl status "$IFACE" | grep -E "DNS Server|DNS Over TLS|DNSSEC"
+else
+    echo "   No default route yet — per-interface config will apply on first connection."
+fi
 
 # ─────────────────────────────────────────────
 # 2. sysctl hardening
@@ -102,6 +107,6 @@ systemctl restart nftables
 
 echo ""
 echo "✓ All done. Verify with:"
-echo "  resolvectl status $IFACE"
+echo "  resolvectl status"
 echo "  nft list ruleset"
 echo "  sysctl -a | grep -E 'rp_filter|timestamps|tempaddr|conntrack_max'"
