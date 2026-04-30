@@ -6,7 +6,7 @@ set -euo pipefail
 mkdir -p /etc/systemd/resolved.conf.d
 cat > /etc/systemd/resolved.conf.d/dot-quad9.conf << 'EOF'
 [Resolve]
-DNS=9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net 2620:fe::fe#dns.quad9.net 2620:fe::9#dns.quad9.net
+DNS=9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net
 DNSOverTLS=yes
 DNSSEC=yes
 FallbackDNS=
@@ -16,11 +16,7 @@ ln -sf /run/systemd/resolved/stub-resolv.conf /etc/resolv.conf
 
 IFACE=$(ip route show default 2>/dev/null | awk 'NR==1 {print $5}')
 if [[ -n "$IFACE" ]]; then
-    resolvectl dns "$IFACE" \
-        "9.9.9.9#dns.quad9.net" \
-        "149.112.112.112#dns.quad9.net" \
-        "2620:fe::fe#dns.quad9.net" \
-        "2620:fe::9#dns.quad9.net"
+    resolvectl dns "$IFACE" "9.9.9.9#dns.quad9.net" "149.112.112.112#dns.quad9.net"
     resolvectl dnsovertls "$IFACE" yes
     resolvectl dnssec "$IFACE" yes
 fi
