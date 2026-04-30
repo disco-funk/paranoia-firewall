@@ -12,7 +12,7 @@ DNSSEC=yes
 FallbackDNS=
 EOF
 systemctl restart systemd-resolved
-ln -sf /run/systemd/resolved/stub-resolv.conf /etc/resolv.conf
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
 IFACE=$(ip route show default 2>/dev/null | awk 'NR==1 {print $5}')
 if [[ -n "$IFACE" ]]; then
