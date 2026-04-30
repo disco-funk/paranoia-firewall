@@ -21,6 +21,8 @@ if [[ -n "$IFACE" ]]; then
     resolvectl dnssec "$IFACE" yes
 fi
 
+echo nf_conntrack > /etc/modules-load.d/nf_conntrack.conf
+modprobe nf_conntrack
 cat > /etc/sysctl.d/99-stealth-hardening.conf << 'EOF'
 net.ipv4.tcp_timestamps = 0
 net.ipv4.conf.all.rp_filter = 1
