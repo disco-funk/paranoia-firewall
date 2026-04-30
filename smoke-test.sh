@@ -17,11 +17,14 @@ check_blocked() {
     if "$@" >/dev/null 2>&1; then fail "$label"; else ok "$label"; fi
 }
 
+IFACE=$(ip route show default 2>/dev/null | awk 'NR==1 {print $5}')
+
 echo "=== config ==="
-check "resolved live: DoT active"              bash -c 'resolvectl status | grep -q +DNSOverTLS'
-check "resolved live: DNSSEC active"           bash -c 'resolvectl status | grep -q "DNSSEC setting: yes"'
-check "resolved live: 9.9.9.9 active"          bash -c 'resolvectl dns | grep -q 9\.9\.9\.9'
-check "resolved live: 149.112.112.112 active"  bash -c 'resolvectl dns | grep -q 149\.112\.112\.112'
+check "active interface found"                          test -n "$IFACE"
+check "resolved live: DoT active on $IFACE"             bash -c "resolvectl status $IFACE | grep -q '+DNSOverTLS'"
+check "resolved live: DNSSEC active on $IFACE"          bash -c "resolvectl status $IFACE | grep -q 'DNSSEC=yes'"
+check "resolved live: 9.9.9.9 active on $IFACE"         bash -c "resolvectl status $IFACE | grep -q '9\.9\.9\.9'"
+check "resolved live: 149.112.112.112 active on $IFACE" bash -c "resolvectl status $IFACE | grep -q '149\.112\.112\.112'"
 check "resolv.conf symlink to stub"       bash -c  'readlink /etc/resolv.conf | grep -q stub-resolv'
 check "sysctl tcp_timestamps=0"           bash -c  '[[ $(sysctl -n net.ipv4.tcp_timestamps) == 0 ]]'
 check "sysctl rp_filter=1"               bash -c  '[[ $(sysctl -n net.ipv4.conf.all.rp_filter) == 1 ]]'
