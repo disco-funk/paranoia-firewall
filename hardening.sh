@@ -36,30 +36,30 @@ systemctl restart systemd-timesyncd
 echo nf_conntrack > /etc/modules-load.d/nf_conntrack.conf
 modprobe nf_conntrack
 cat > /etc/sysctl.d/99-stealth-hardening.conf << 'EOF'
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
-net.ipv4.conf.all.log_martians = 1
-net.ipv4.conf.all.accept_redirects = 0
-net.ipv4.conf.default.accept_redirects = 0
-net.ipv4.conf.all.send_redirects = 0
-net.ipv4.conf.default.send_redirects = 0
-net.ipv4.conf.all.accept_source_route = 0
-net.ipv4.conf.default.accept_source_route = 0
-net.ipv4.tcp_syncookies = 1
-net.ipv4.tcp_mtu_probing = 1
-net.ipv4.tcp_timestamps = 0
-net.ipv4.icmp_echo_ignore_broadcasts = 1
-net.ipv6.conf.all.accept_redirects = 0
-net.ipv6.conf.default.accept_redirects = 0
-net.ipv6.conf.all.use_tempaddr = 2
-net.ipv6.conf.default.use_tempaddr = 2
-net.ipv6.conf.all.accept_source_route = 0
-net.ipv6.conf.default.accept_source_route = 0
-net.netfilter.nf_conntrack_max = 65536
-net.netfilter.nf_conntrack_tcp_timeout_syn_sent = 1
-net.core.bpf_jit_harden = 2
 kernel.kptr_restrict = 2
 kernel.unprivileged_bpf_disabled = 1
+net.core.bpf_jit_harden = 2
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_timestamps = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.all.use_tempaddr = 2
+net.ipv6.conf.default.accept_redirects = 0
+net.ipv6.conf.default.accept_source_route = 0
+net.ipv6.conf.default.use_tempaddr = 2
+net.netfilter.nf_conntrack_max = 65536
+net.netfilter.nf_conntrack_tcp_timeout_syn_sent = 1
 EOF
 sysctl -p /etc/sysctl.d/99-stealth-hardening.conf
 
