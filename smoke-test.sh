@@ -18,11 +18,10 @@ check_blocked() {
 }
 
 echo "=== config ==="
-check "resolved DNSOverTLS=yes"            grep -q  'DNSOverTLS=yes'                /etc/systemd/resolved.conf.d/dot-quad9.conf
-check "resolved DNSSEC=yes"               grep -q  'DNSSEC=yes'                    /etc/systemd/resolved.conf.d/dot-quad9.conf
-check "resolved FallbackDNS empty"        grep -qE '^FallbackDNS=$'                /etc/systemd/resolved.conf.d/dot-quad9.conf
-check "resolved 9.9.9.9 pinned"           grep -q  '9.9.9.9#dns.quad9.net'         /etc/systemd/resolved.conf.d/dot-quad9.conf
-check "resolved 149.112.112.112 pinned"   grep -q  '149.112.112.112#dns.quad9.net' /etc/systemd/resolved.conf.d/dot-quad9.conf
+check "resolved live: DoT active"              bash -c 'resolvectl status | grep -q +DNSOverTLS'
+check "resolved live: DNSSEC active"           bash -c 'resolvectl status | grep -q "DNSSEC setting: yes"'
+check "resolved live: 9.9.9.9 active"          bash -c 'resolvectl dns | grep -q 9\.9\.9\.9'
+check "resolved live: 149.112.112.112 active"  bash -c 'resolvectl dns | grep -q 149\.112\.112\.112'
 check "resolv.conf symlink to stub"       bash -c  'readlink /etc/resolv.conf | grep -q stub-resolv'
 check "sysctl tcp_timestamps=0"           bash -c  '[[ $(sysctl -n net.ipv4.tcp_timestamps) == 0 ]]'
 check "sysctl rp_filter=1"               bash -c  '[[ $(sysctl -n net.ipv4.conf.all.rp_filter) == 1 ]]'
