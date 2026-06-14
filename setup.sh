@@ -12,8 +12,8 @@ echo "Making directories..."
 sudo mkdir -p /etc/systemd/resolved.conf.d/
 
 echo "Copying configuration files..."
-sudo cp ./sysctl.conf /etc/sysctl.d/90-custom.conf
-sudo cp ./default.conf /etc/systemd/resolved.conf.d/dns-over-tls.conf
+sudo cp ./90-custom-sysctl.conf /etc/sysctl.d/90-custom.conf
+sudo cp ./dns-over-tls-resolved.conf /etc/systemd/resolved.conf.d/dns-over-tls.conf
 sudo cp ./nftables.conf /etc/nftables.conf
 
 echo "Making files executable..."
@@ -35,6 +35,14 @@ sudo systemctl restart systemd-sysctl
 sudo systemctl restart systemd-resolved
 sudo systemctl restart nftables
 sudo systemctl restart NetworkManager
+
+echo "Waiting for ${CONN} to connect — plug in the ethernet cable now..."
+until nmcli -g NAME connection show --active 2>/dev/null | grep -qF "${CONN}"; do
+    sleep 1
+done
+echo "${CONN} connected, cycling connection to apply new DNS settings..."
+nmcli connection down "${CONN}"
+nmcli connection up "${CONN}"
 
 echo "Finished, command outputs as follows:"
 nmcli
