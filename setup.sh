@@ -81,6 +81,8 @@ else
     echo "Configuring dnsmasq..."
     sudo mkdir -p /etc/dnsmasq.d/
     sudo cp ./dnsmasq-pi.conf /etc/dnsmasq.d/dns-privacy.conf
+    sudo cp ./dnsmasq-pi.service /etc/systemd/system/dnsmasq.service
+    sudo systemctl daemon-reload
 
     echo "Modifying connection..."
     nmcli connection modify "${CONN}" ipv6.method link-local
