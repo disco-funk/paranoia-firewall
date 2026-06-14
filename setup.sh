@@ -92,7 +92,10 @@ else
     echo "Quiescing apt timers and NM connectivity check before network comes up..."
     sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
     sudo systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
-    nmcli general connectivity-check set disabled
+    # Disable NM connectivity check via config file — more portable than
+    # 'nmcli general connectivity-check set', which isn't available on all builds.
+    sudo mkdir -p /etc/NetworkManager/conf.d/
+    sudo cp ./no-connectivity-check.conf /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
 
     echo "Enabling and restarting services..."
     sudo systemctl enable nftables
@@ -140,7 +143,8 @@ fi
 if [[ "$PLATFORM" == "pi" ]]; then
     echo "Re-enabling background services..."
     sudo systemctl start apt-daily.timer apt-daily-upgrade.timer
-    nmcli general connectivity-check set enabled
+    sudo rm -f /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
+    sudo systemctl reload NetworkManager
 fi
 
 # --- Status ---
