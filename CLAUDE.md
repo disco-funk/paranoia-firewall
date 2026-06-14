@@ -2,50 +2,77 @@
 
 ## Project overview
 
-Shell-based Ubuntu firewall hardening project. No build system, no dependencies, no tests. Four files: one setup script and three config files that get deployed to system paths.
+Shell-based firewall hardening project for Ubuntu and Raspberry Pi. No build system, no dependencies, no tests. One setup script and a set of config files deployed to system paths.
 
-**Intended workflow:** `setup.sh` is run on a fresh Ubuntu install while the machine is still air-gapped (no network cable connected). The firewall is fully in place before the ethernet cable is ever plugged in, so the machine is never exposed to the internet without protection.
+**Intended workflow:** `setup.sh` is run on a fresh install while the machine is still air-gapped (no network cable connected). The firewall is fully in place before the ethernet cable is ever plugged in, so the machine is never exposed to the internet without protection.
 
 ## File map
 
-- `setup.sh` — orchestration script; must be run as root on the target Ubuntu system
-- `nftables.conf` — nftables firewall ruleset (inet filter table, three chains)
-- `90-custom-sysctl.conf` — kernel parameter hardening (deployed as `/etc/sysctl.d/90-custom.conf`)
-- `dns-over-tls-resolved.conf` — systemd-resolved config enabling DNS-over-TLS + DNSSEC via Quad9
+| File | Platform | Purpose |
+| ---- | -------- | ------- |
+| `setup.sh` | both | Orchestration script; run as root |
+| `nftables.conf` | both | Firewall ruleset |
+| `90-custom-sysctl.conf` | both | Kernel hardening (→ `/etc/sysctl.d/90-custom.conf`) |
+| `dns-over-tls-resolved.conf` | Ubuntu | systemd-resolved DoT + DNSSEC config |
+| `dnsmasq-pi.conf` | Pi | dnsmasq DNSSEC + forward to 127.0.0.1:5300 |
+| `stubby-pi.yml` | Pi | stubby DoT config (listens on 127.0.0.1:5300) |
+| `dot-proxy.py` | Pi bootstrap | Temporary Python DoT proxy, same port as stubby |
+
+## Platform detection
+
+`setup.sh` sources `/etc/os-release` and reads `$ID`:
+
+- `ubuntu` → Ubuntu path
+- `raspbian` → Pi path
+- `debian` + `/proc/device-tree/model` contains "raspberry pi" → Pi path
 
 ## Key design decisions
 
-- **Air-gapped first:** The setup is designed to run before any network connection is made. Don't change this workflow.
-- **Default-deny everywhere:** INPUT, FORWARD, and OUTPUT chains all drop by default. Any new allowed traffic requires an explicit rule addition to `nftables.conf`.
-- **Quad9 only:** DNS is locked to 9.9.9.9 and 149.112.112.112. No fallback DNS is configured — intentional to prevent DNS leaks.
-- **No forwarding:** The FORWARD chain drops everything. This machine is not a router.
-- **NTP pinned to Cloudflare:** UDP 123 is only allowed to 162.159.200.123 and 162.159.200.1, not open to any destination.
-- **DNS-over-TLS port 853 is explicitly allowlisted** in the firewall so systemd-resolved can reach Quad9. If DNS servers change, both `dns-over-tls-resolved.conf` and `nftables.conf` need updating.
+- **Air-gapped first:** Run `setup.sh` before any network connection. Don't change this.
+- **Default-deny everywhere:** INPUT, FORWARD, and OUTPUT chains all drop by default. Any new allowed traffic requires an explicit rule in `nftables.conf`.
+- **Quad9 only:** DNS locked to 9.9.9.9 and 149.112.112.112. No fallback — intentional to prevent leaks.
+- **No forwarding:** FORWARD chain drops everything. This machine is not a router.
+- **NTP pinned to Cloudflare:** UDP 123 allowed only to 162.159.200.123 and 162.159.200.1.
+- **Port 853 allowlisted:** Both Ubuntu (systemd-resolved) and Pi (stubby/proxy) need TCP 853 outbound to Quad9. If DNS servers change, update both the DNS config and `nftables.conf`.
+- **dnsmasq always forwards to :5300:** The Pi dnsmasq config points to `127.0.0.1#5300` regardless of whether the Python proxy or stubby is listening there. No config change needed when the proxy is replaced by stubby.
+
+## Pi bootstrap sequence
+
+When stubby is not pre-installed:
+
+1. dnsmasq starts, forwarding to `127.0.0.1:5300` (nothing listening yet — intentional, no network yet)
+2. apt timers and NM connectivity check are stopped before cable plug-in
+3. Ethernet cable is plugged in; connection is cycled
+4. `dot-proxy.py` starts on `127.0.0.1:5300`
+5. `apt-get install stubby` runs — dnsmasq → proxy → Quad9 DoT
+6. Proxy is killed; stubby takes over on the same port
+7. apt timers and connectivity check are re-enabled
+
+If stubby is pre-installed (recommended: `apt install stubby` on a trusted network before air-gapping), steps 4–6 are skipped.
 
 ## When editing firewall rules
 
 The `nftables.conf` structure has three chains in one `inet filter` table:
-1. `ct_base` — shared stateful logic (drop invalid, accept established/related); called via jump from input and output
+
+1. `ct_base` — shared stateful logic (drop invalid, accept established/related)
 2. `input` — inbound traffic policy
-3. `output` — outbound traffic policy; `forward` — all-drop, no rules needed
+3. `output` — outbound traffic policy
+4. `forward` — all-drop, no rules needed
 
-ICMP is rate-limited to 10/second. IPv6 neighbor discovery and router advertisements are explicitly permitted in both input and output.
+ICMP is rate-limited to 10/second. IPv6 neighbour discovery and router advertisements are explicitly permitted in both input and output.
 
-## Applying changes
-
-Changes to config files don't take effect until `setup.sh` is re-run on the target system, or the relevant service is restarted manually:
+## Applying changes manually
 
 ```bash
 # Firewall
 sudo nft -f /etc/nftables.conf
 
-# DNS
+# DNS (Ubuntu)
 sudo systemctl restart systemd-resolved
+
+# DNS (Pi)
+sudo systemctl restart stubby dnsmasq
 
 # Kernel params
 sudo sysctl --system
 ```
-
-## Platform
-
-Ubuntu only. The script uses NetworkManager (`nmcli`) for DNS and connection configuration. It will not work on systems using other network managers (e.g. netplan without NM, ifupdown).
