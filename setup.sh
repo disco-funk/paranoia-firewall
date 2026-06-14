@@ -123,6 +123,12 @@ nmcli connection up "${CONN}"
 
 # --- Pi bootstrap: use Python DoT proxy to install stubby, then replace it ---
 if [[ "$PLATFORM" == "pi" ]] && ! $HAS_STUBBY; then
+    # Pi 4 has no RTC — a wrong clock causes TLS cert validation to fail.
+    echo "System date/time: $(date)"
+    read -r -p "If this looks wrong, press Ctrl-C and fix it with: sudo timedatectl set-time 'YYYY-MM-DD HH:MM:SS'  — otherwise press Enter to continue: "
+
+    # Kill any stale proxy left over from a previous failed run.
+    sudo pkill -f dot-proxy.py 2>/dev/null || true
     echo "Starting Python DoT proxy..."
     sudo python3 ./dot-proxy.py &
     PROXY_PID=$!
