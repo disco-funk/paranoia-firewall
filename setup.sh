@@ -37,11 +37,10 @@ sudo mkdir -p /etc/systemd/resolved.conf.d/
 echo "Copying shared configuration files..."
 sudo cp ./90-custom-sysctl.conf /etc/sysctl.d/90-custom.conf
 sudo cp ./nftables.conf /etc/nftables.conf
-sudo chmod u+x /etc/nftables.conf
 
 echo "Applying kernel parameters and firewall rules..."
 sudo sysctl -p /etc/sysctl.d/90-custom.conf
-sudo /etc/nftables.conf
+sudo nft -f /etc/nftables.conf
 
 # --- Platform-specific DNS configuration ---
 HAS_STUBBY=false
