@@ -31,6 +31,7 @@ The script auto-detects the distro and active ethernet connection, deploys confi
 Uses `systemd-resolved` for DNS-over-TLS and DNSSEC. No extra packages needed.
 
 ### Raspberry Pi OS (Debian Trixie / Bookworm)
+
 Uses `dnsmasq` (must be pre-installed) for DNSSEC + local resolution, and `stubby` for DNS-over-TLS.
 
 **If stubby is already installed** (`apt install stubby` on a trusted network before air-gapping), it is used directly.
@@ -43,6 +44,7 @@ Uses `dnsmasq` (must be pre-installed) for DNSSEC + local resolution, and `stubb
 | ---- | -------- | ------------ | ------- |
 | `nftables.conf` | both | `/etc/nftables.conf` | Firewall ruleset |
 | `90-custom-sysctl.conf` | both | `/etc/sysctl.d/90-custom.conf` | Kernel hardening |
+| `timesyncd-cloudflare.conf` | both | `/etc/systemd/timesyncd.conf.d/cloudflare.conf` | NTP pinned to Cloudflare |
 | `dns-over-tls-resolved.conf` | Ubuntu | `/etc/systemd/resolved.conf.d/dns-over-tls.conf` | systemd-resolved DoT + DNSSEC |
 | `dnsmasq-pi.conf` | Pi | `/etc/dnsmasq.d/dns-privacy.conf` | dnsmasq DNSSEC + forward to :5300 |
 | `stubby-pi.yml` | Pi | `/etc/stubby/stubby.yml` | stubby DoT config |

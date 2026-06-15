@@ -49,6 +49,12 @@ echo "Applying kernel parameters and firewall rules..."
 sudo sysctl -p /etc/sysctl.d/90-custom.conf
 sudo nft -f /etc/nftables.conf
 
+echo "Configuring NTP (Cloudflare time service)..."
+sudo mkdir -p /etc/systemd/timesyncd.conf.d/
+sudo cp ./timesyncd-cloudflare.conf /etc/systemd/timesyncd.conf.d/cloudflare.conf
+sudo timedatectl set-ntp true
+sudo systemctl restart systemd-timesyncd
+
 # --- Platform-specific DNS configuration ---
 HAS_STUBBY=false
 

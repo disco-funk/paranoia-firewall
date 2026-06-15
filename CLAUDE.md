@@ -13,6 +13,7 @@ Shell-based firewall hardening project for Ubuntu and Raspberry Pi. No build sys
 | `setup.sh` | both | Orchestration script; run as root |
 | `nftables.conf` | both | Firewall ruleset |
 | `90-custom-sysctl.conf` | both | Kernel hardening (→ `/etc/sysctl.d/90-custom.conf`) |
+| `timesyncd-cloudflare.conf` | both | NTP pinned to Cloudflare (→ `/etc/systemd/timesyncd.conf.d/cloudflare.conf`) |
 | `dns-over-tls-resolved.conf` | Ubuntu | systemd-resolved DoT + DNSSEC config |
 | `dnsmasq-pi.conf` | Pi | dnsmasq DNSSEC + forward to 127.0.0.1:5300 |
 | `stubby-pi.yml` | Pi | stubby DoT config (listens on 127.0.0.1:5300) |
