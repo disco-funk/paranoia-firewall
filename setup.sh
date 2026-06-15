@@ -127,6 +127,12 @@ done
 echo "${CONN} connected, cycling connection to apply new DNS settings..."
 nmcli connection down "${CONN}"
 nmcli connection up "${CONN}"
+# nmcli connection up returns as soon as NM marks the link activated, before DHCP
+# completes. Wait for a default route so we know an IP is actually assigned.
+echo "Waiting for DHCP..."
+until ip route show default 2>/dev/null | grep -q .; do
+    sleep 1
+done
 
 # --- Pi bootstrap: use Python DoT proxy to install stubby, then replace it ---
 if [[ "$PLATFORM" == "pi" ]] && ! $HAS_STUBBY; then
@@ -137,6 +143,8 @@ if [[ "$PLATFORM" == "pi" ]] && ! $HAS_STUBBY; then
     PROXY_PID=$!
     sleep 1
 
+    echo "Refreshing package lists..."
+    sudo apt-get update
     echo "Installing stubby via proxy..."
     sudo apt-get install -y stubby
 
