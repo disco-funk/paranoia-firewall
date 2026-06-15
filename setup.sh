@@ -23,6 +23,13 @@ if [[ "$PLATFORM" == "unsupported" ]]; then
     exit 1
 fi
 
+# Pi 4 has no RTC — a wrong clock causes TLS cert validation to fail later.
+# Check early before anything else happens.
+if [[ "$PLATFORM" == "pi" ]]; then
+    echo "System date/time: $(date)"
+    read -r -p "If this looks wrong, press Ctrl-C now and fix with: sudo timedatectl set-time 'YYYY-MM-DD HH:MM:SS' — otherwise press Enter to continue: "
+fi
+
 # --- Connection detection ---
 CONN=$(nmcli -g NAME,TYPE connection | awk -F : '/.*ethernet.*/ { print $1 }')
 echo "Using connection: ${CONN}"
@@ -123,10 +130,6 @@ nmcli connection up "${CONN}"
 
 # --- Pi bootstrap: use Python DoT proxy to install stubby, then replace it ---
 if [[ "$PLATFORM" == "pi" ]] && ! $HAS_STUBBY; then
-    # Pi 4 has no RTC — a wrong clock causes TLS cert validation to fail.
-    echo "System date/time: $(date)"
-    read -r -p "If this looks wrong, press Ctrl-C and fix it with: sudo timedatectl set-time 'YYYY-MM-DD HH:MM:SS'  — otherwise press Enter to continue: "
-
     # Kill any stale proxy left over from a previous failed run.
     sudo pkill -f dot-proxy.py 2>/dev/null || true
     echo "Starting Python DoT proxy..."

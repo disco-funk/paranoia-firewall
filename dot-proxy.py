@@ -18,7 +18,8 @@ UPSTREAM_SERVERS = [
 ]
 LISTEN_ADDR = '127.0.0.1'
 LISTEN_PORT = 5300
-TIMEOUT = 5
+CONNECT_TIMEOUT = 5   # TCP connection establishment
+DATA_TIMEOUT    = 15  # TLS handshake + query/response (DNSSEC responses can be large)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
@@ -38,16 +39,21 @@ def recv_exact(sock, n):
 
 def forward(query, addr, udp_sock):
     for host, port, hostname in UPSTREAM_SERVERS:
-        try:
-            with socket.create_connection((host, port), timeout=TIMEOUT) as raw:
-                with ctx.wrap_socket(raw, server_hostname=hostname) as tls:
-                    tls.sendall(struct.pack('!H', len(query)) + query)
-                    length = struct.unpack('!H', recv_exact(tls, 2))[0]
-                    response = recv_exact(tls, length)
-            udp_sock.sendto(response, addr)
-            return
-        except Exception as exc:
-            log.warning('upstream %s:%d failed: %s', host, port, exc)
+        for attempt in range(2):
+            try:
+                with socket.create_connection((host, port), timeout=CONNECT_TIMEOUT) as raw:
+                    raw.settimeout(DATA_TIMEOUT)
+                    with ctx.wrap_socket(raw, server_hostname=hostname) as tls:
+                        tls.sendall(struct.pack('!H', len(query)) + query)
+                        length = struct.unpack('!H', recv_exact(tls, 2))[0]
+                        response = recv_exact(tls, length)
+                udp_sock.sendto(response, addr)
+                return
+            except ConnectionError as exc:
+                log.warning('upstream %s:%d attempt %d: %s', host, port, attempt + 1, exc)
+            except Exception as exc:
+                log.warning('upstream %s:%d failed: %s', host, port, exc)
+                break  # non-recoverable (TLS error, timeout, etc.) — try next server
     log.error('all upstream servers failed for query from %s', addr)
 
 
