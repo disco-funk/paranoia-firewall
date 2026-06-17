@@ -1,0 +1,11 @@
+[Unit]
+Description=dnsmasq DNS forwarder
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --no-daemon --conf-file=/etc/dnsmasq.d/dns-privacy.conf
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
