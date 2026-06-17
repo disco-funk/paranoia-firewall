@@ -54,8 +54,7 @@ sudo nft -f /etc/nftables.conf
 echo "Configuring NTP (Cloudflare time service)..."
 if command -v chronyd &>/dev/null; then
     echo "chrony detected — pinning chrony to Cloudflare."
-    sudo mkdir -p /etc/chrony/conf.d/
-    sudo cp ./chrony-cloudflare.conf /etc/chrony/conf.d/cloudflare.conf
+    sudo cp ./chrony.conf /etc/chrony/chrony.conf
     sudo systemctl restart chrony 2>/dev/null || sudo systemctl restart chronyd
 else
     echo "systemd-timesyncd path — pinning timesyncd to Cloudflare."

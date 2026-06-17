@@ -14,7 +14,7 @@ Shell-based firewall hardening project for Ubuntu and Raspberry Pi. No build sys
 | `nftables.conf` | both | Firewall ruleset |
 | `90-custom-sysctl.conf` | both | Kernel hardening (→ `/etc/sysctl.d/90-custom.conf`) |
 | `timesyncd-cloudflare.conf` | both | NTP pinned to Cloudflare via systemd-timesyncd (→ `/etc/systemd/timesyncd.conf.d/cloudflare.conf`) |
-| `chrony-cloudflare.conf` | Ubuntu live boot | NTP pinned to Cloudflare via chrony (→ `/etc/chrony/conf.d/cloudflare.conf`) |
+| `chrony.conf` | Ubuntu live boot | Full chrony config, NTP pinned to Cloudflare, DHCP/pool sources removed (→ `/etc/chrony/chrony.conf`) |
 | `dns-over-tls-resolved.conf` | Ubuntu | systemd-resolved DoT + DNSSEC config |
 | `dnsmasq-pi.conf` | Pi | dnsmasq DNSSEC + forward to 127.0.0.1:5300 |
 | `stubby-pi.yml` | Pi | stubby DoT config (listens on 127.0.0.1:5300) |
@@ -34,7 +34,7 @@ Shell-based firewall hardening project for Ubuntu and Raspberry Pi. No build sys
 - **Default-deny everywhere:** INPUT, FORWARD, and OUTPUT chains all drop by default. Any new allowed traffic requires an explicit rule in `nftables.conf`.
 - **Quad9 only:** DNS locked to 9.9.9.9 and 149.112.112.112. No fallback — intentional to prevent leaks.
 - **No forwarding:** FORWARD chain drops everything. This machine is not a router.
-- **NTP pinned to Cloudflare:** UDP 123 allowed only to 162.159.200.123 and 162.159.200.1. `setup.sh` configures whichever NTP daemon is present — chrony (Ubuntu 26.04 live boot) or systemd-timesyncd (Pi, most Ubuntu installs). The chrony drop-in only adds the Cloudflare servers; any default pool servers are unreachable because the firewall drops UDP 123 to all other destinations.
+- **NTP pinned to Cloudflare:** UDP 123 allowed only to 162.159.200.123 and 162.159.200.1. `setup.sh` configures whichever NTP daemon is present — chrony (Ubuntu 26.04 live boot) or systemd-timesyncd (Pi, most Ubuntu installs). The chrony path overwrites `/etc/chrony/chrony.conf` entirely, dropping the DHCP (`/run/chrony-dhcp`) and Ubuntu pool (`/etc/chrony/sources.d`) source directories so an untrusted LAN cannot steer the clock; only the two Cloudflare servers remain.
 - **Port 853 allowlisted:** Both Ubuntu (systemd-resolved) and Pi (stubby/proxy) need TCP 853 outbound to Quad9. If DNS servers change, update both the DNS config and `nftables.conf`.
 - **dnsmasq always forwards to :5300:** The Pi dnsmasq config points to `127.0.0.1#5300` regardless of whether the Python proxy or stubby is listening there. No config change needed when the proxy is replaced by stubby.
 
