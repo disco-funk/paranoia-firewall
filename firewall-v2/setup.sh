@@ -23,12 +23,11 @@ if [[ "$PLATFORM" == "unsupported" ]]; then
     exit 1
 fi
 
-# Pi 4 has no RTC — a wrong clock causes TLS cert validation to fail later.
-# Check early before anything else happens.
-if [[ "$PLATFORM" == "pi" ]]; then
-    echo "System date/time: $(date)"
-    read -r -p "If this looks wrong, press Ctrl-C now and fix with: sudo timedatectl set-time 'YYYY-MM-DD HH:MM:SS' — otherwise press Enter to continue: "
-fi
+# A wrong clock causes TLS cert validation to fail later (DoT, HTTPS).
+# The Pi 4 has no RTC, and an Ubuntu live boot may also carry a bad clock —
+# both run air-gapped here, so verify on every platform before anything else.
+echo "System date/time: $(date)"
+read -r -p "If this looks wrong, press Ctrl-C now and fix with: sudo timedatectl set-time 'YYYY-MM-DD HH:MM:SS' — otherwise press Enter to continue: "
 
 # --- Connection detection ---
 CONN=$(nmcli -g NAME,TYPE connection | awk -F : '/.*ethernet.*/ { print $1 }')
@@ -49,11 +48,22 @@ echo "Applying kernel parameters and firewall rules..."
 sudo sysctl -p /etc/sysctl.d/90-custom.conf
 sudo nft -f /etc/nftables.conf
 
+# NTP daemon varies by platform: systemd-timesyncd on the Pi and most Ubuntu
+# installs, but the Ubuntu 26.04 live boot ships chrony. Configure whichever is
+# present — both pin to the same Cloudflare servers allowed in nftables.conf.
 echo "Configuring NTP (Cloudflare time service)..."
-sudo mkdir -p /etc/systemd/timesyncd.conf.d/
-sudo cp ./timesyncd-cloudflare.conf /etc/systemd/timesyncd.conf.d/cloudflare.conf
-sudo timedatectl set-ntp true
-sudo systemctl restart systemd-timesyncd
+if command -v chronyd &>/dev/null; then
+    echo "chrony detected — pinning chrony to Cloudflare."
+    sudo mkdir -p /etc/chrony/conf.d/
+    sudo cp ./chrony-cloudflare.conf /etc/chrony/conf.d/cloudflare.conf
+    sudo systemctl restart chrony 2>/dev/null || sudo systemctl restart chronyd
+else
+    echo "systemd-timesyncd path — pinning timesyncd to Cloudflare."
+    sudo mkdir -p /etc/systemd/timesyncd.conf.d/
+    sudo cp ./timesyncd-cloudflare.conf /etc/systemd/timesyncd.conf.d/cloudflare.conf
+    sudo timedatectl set-ntp true
+    sudo systemctl restart systemd-timesyncd
+fi
 
 # --- Platform-specific DNS configuration ---
 HAS_STUBBY=false
