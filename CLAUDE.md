@@ -90,10 +90,14 @@ CI (`.github/workflows/ci.yml`) has two jobs:
 
 `check-invariants.sh` mechanically enforces the constraints above: no port 53 in any form (including inside a set, and the `domain` keyword), DoT pinned to both Quad9 IPv4 addresses and no IPv6, NTP pinned to both Cloudflare addresses, default-drop on all three chains, no inbound TCP ports, no comments in `firewall-v1/`, no `sudo` inside either script, and no stray files at the `firewall-v2/` top level. **If you change a constraint, change that script too** — otherwise CI will contradict this file.
 
-Two assertions in the network section are deliberately not what they look like, and should not be "simplified":
+The `config` section additionally checks DNSSEC with three cases that only mean something together: a signed domain (`cloudflare.com`) must resolve, the deliberately bogus-signed `dnssec-failed.org` must be rejected *and reported as a DNSSEC failure*, and a nonexistent name under the signed `example.com` zone must come back as NXDOMAIN rather than as a validation failure. The good-domain control is what stops a resolver that fails every query from "passing" the bogus check; the NXDOMAIN case is what stops a resolver that blames DNSSEC for everything. Do not drop any one of the three. These need `systemd-resolved`, so CI does not run them.
+
+Several assertions are deliberately not what they look like, and should not be "simplified":
 
 - **ICMP egress is tested against the default gateway, not a public IP.** Many networks — including the Azure-hosted GitHub runners — drop outbound ICMP to the internet regardless of local rules. Pinging `9.9.9.9` therefore makes v1's "blocked" assertion pass for the wrong reason and v2's "allowed" assertion fail for the wrong reason. The gateway is inside our own segment, so only the output chain is under test.
 - **The Quad9 IPv6 DoT checks are skipped, not passed, when there is no global IPv6 address.** Without IPv6 routing those connects fail for lack of a route rather than because the firewall dropped them, which is a vacuous pass.
+- **The SSH check targets `gitlab.com`, not GitHub and not `9.9.9.9`.** Nothing listens on `9.9.9.9:22`, so blocking it proves nothing; and v2 *permits* 22 to the pinned `@github_ips` set, so GitHub would be allowed. `gitlab.com` runs sshd and is outside that set, so both versions must drop it.
+- **CI probes every "must be blocked" target before loading any ruleset** and exports the unreachable ones as `SMOKE_VACUOUS_TARGETS`, which the smoke test skips rather than counting as passes. It hard-fails if `9.9.9.9:53` or `8.8.8.8:853` are unreachable beforehand, since those two carry the assertions this project exists to make.
 
 CI deliberately never runs `sysctl -p`. Three of the parameters (`kernel.kptr_restrict`, `kernel.unprivileged_bpf_disabled`, `net.core.bpf_jit_harden`) are not network-namespaced, so in a privileged container they would mutate the runner's host kernel instead of testing anything. Nor does CI run `setup.sh`: it waits for DHCP, which Docker does not provide. Those paths are only exercised on a real host.
 

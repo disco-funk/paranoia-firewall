@@ -114,6 +114,8 @@ sudo bash smoke-test.sh config                 # host DNS/sysctl state only
 
 The `config` section needs systemd-resolved running, so it is meaningful only on a real deployed host. The `network` section runs anywhere the ruleset is loaded. `FIREWALL_VERSION` defaults to `v1`; set it to `v2` because v2 permits outbound ping where v1 drops it.
 
+The `config` section also validates DNSSEC end to end: a signed domain must resolve, the bogus-signed `dnssec-failed.org` must be rejected *as a DNSSEC failure*, and a nonexistent name under a signed zone must return NXDOMAIN rather than a validation error. All three matter — without the first, a totally broken resolver would appear to "reject the bogus zone" correctly.
+
 ### Continuous integration
 
 Every push runs two jobs (`.github/workflows/ci.yml`):

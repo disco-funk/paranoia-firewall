@@ -69,12 +69,14 @@ jobs:
         id: hosts
         run: |
           example_ip=$(getent ahostsv4 example.com | awk 'NR==1 {print $1}')
-          if [[ -z "$example_ip" ]]; then
-            echo "Could not resolve example.com on the runner" >&2
+          gitlab_ip=$(getent ahostsv4 gitlab.com | awk 'NR==1 {print $1}')
+          if [[ -z "$example_ip" || -z "$gitlab_ip" ]]; then
+            echo "Could not resolve test hostnames on the runner" >&2
             exit 1
           fi
           echo "example=$example_ip" >> "$GITHUB_OUTPUT"
-          echo "example.com=$example_ip"
+          echo "gitlab=$gitlab_ip"   >> "$GITHUB_OUTPUT"
+          echo "example.com=$example_ip gitlab.com=$gitlab_ip"
 
       - name: Load ruleset and assert egress policy
         # --privileged grants NET_ADMIN so nft can write the container's own
@@ -88,6 +90,7 @@ jobs:
         run: |
           docker run --rm --privileged \
             --add-host "example.com:${{ steps.hosts.outputs.example }}" \
+            --add-host "gitlab.com:${{ steps.hosts.outputs.gitlab }}" \
             -e RULESET \
             -e FIREWALL_VERSION \
             -v "$PWD:/repo" -w /repo \
@@ -99,17 +102,21 @@ jobs:
                 nftables iproute2 iputils-ping netcat-openbsd dnsutils wget ca-certificates >/dev/null
 
               # A "blocked" assertion against a target that is unreachable anyway
-              # proves nothing. Probe the red targets with no firewall loaded, so
-              # a vacuous assertion is visible rather than a silent green tick.
+              # proves nothing. Probe the red targets with no firewall loaded and
+              # collect the unreachable ones, so the smoke test skips them rather
+              # than recording a meaningless pass.
               echo "--- baseline reachability, BEFORE any ruleset is loaded ---"
-              for t in 9.9.9.9:53 8.8.8.8:53 1.1.1.1:853 8.8.8.8:853 9.9.9.9:22 9.9.9.9:25 9.9.9.9:8080; do
+              VACUOUS=""
+              for t in 9.9.9.9:53 8.8.8.8:53 1.1.1.1:853 8.8.8.8:853 gitlab.com:22 9.9.9.9:25 9.9.9.9:8080; do
                   h=${t%:*}; p=${t##*:}
                   if timeout 5 nc -z "$h" "$p" 2>/dev/null; then
                       echo "  reachable    ${t}"
                   else
-                      echo "  UNREACHABLE  ${t}  <- a later blocked-assertion on this target is vacuous"
+                      echo "  UNREACHABLE  ${t}  <- blocked-assertion on this target would be vacuous; will skip"
+                      VACUOUS="${VACUOUS} ${t}"
                   fi
               done
+              export SMOKE_VACUOUS_TARGETS="${VACUOUS# }"
 
               # These two must be reachable, or the checks that matter most --
               # plain DNS dropped, DoT to a rogue resolver dropped -- assert nothing.
