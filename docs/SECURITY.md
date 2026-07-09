@@ -166,7 +166,7 @@ ct state { established, related } counter accept
 - **Outbound TCP 22 to `@github_ips`.** A hardcoded IP set for a third-party service. GitHub rotates these addresses; a stale set fails closed (git breaks), but the rule widens egress to a set the operator does not control.
 - **Outbound ICMP echo-request to any destination.** Permits ping as a low-bandwidth exfiltration or beaconing channel.
 - **Inbound ICMP echo-request from `192.168.0.0/24`.** A hardcoded RFC 1918 range that may not match the deployed LAN, and which an attacker on the segment can trivially source-spoof.
-- **The Pi bootstrap window.** `dot-proxy.py` terminates TLS to Quad9 in Python during `apt-get install stubby`, with the NM connectivity check disabled. The proxy's certificate validation behaviour should be verified.
+- **The Pi bootstrap window.** `firewall-v2/config/dot-proxy.py` terminates TLS to Quad9 in Python during `apt-get install stubby`, with the NM connectivity check disabled. The proxy's certificate validation behaviour should be verified.
 
 ---
 

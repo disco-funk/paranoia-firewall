@@ -8,17 +8,23 @@ Shell-based firewall hardening project for Ubuntu and Raspberry Pi. No build sys
 
 ## File map
 
+Everything `setup.sh` installs lives in `config/`. The directory holds exactly three things plus that folder: `setup.sh`, `README.md`, `CLAUDE.md`. Keep it that way — new config files go in `config/`, not beside the runner.
+
+`setup.sh` resolves `config/` from its own path via `BASH_SOURCE`, never from the working directory, and aborts if it is missing. Do not reintroduce `./`-relative reads.
+
 | File | Platform | Purpose |
 | ---- | -------- | ------- |
-| `setup.sh` | both | Orchestration script; run as root |
-| `nftables.conf` | both | Firewall ruleset |
-| `90-custom-sysctl.conf` | both | Kernel hardening (→ `/etc/sysctl.d/90-custom.conf`) |
-| `timesyncd-cloudflare.conf` | both | NTP pinned to Cloudflare via systemd-timesyncd (→ `/etc/systemd/timesyncd.conf.d/cloudflare.conf`) |
-| `chrony.conf` | Ubuntu live boot | Full chrony config, NTP pinned to Cloudflare, DHCP/pool sources removed (→ `/etc/chrony/chrony.conf`) |
-| `dns-over-tls-resolved.conf` | Ubuntu | systemd-resolved DoT + DNSSEC config |
-| `dnsmasq-pi.conf` | Pi | dnsmasq DNSSEC + forward to 127.0.0.1:5300 |
-| `stubby-pi.yml` | Pi | stubby DoT config (listens on 127.0.0.1:5300) |
-| `dot-proxy.py` | Pi bootstrap | Temporary Python DoT proxy, same port as stubby |
+| `setup.sh` | both | Orchestration script; run as root. The only executable entry point. |
+| `config/nftables.conf` | both | Firewall ruleset |
+| `config/90-custom-sysctl.conf` | both | Kernel hardening (→ `/etc/sysctl.d/90-custom.conf`) |
+| `config/timesyncd-cloudflare.conf` | both | NTP pinned to Cloudflare via systemd-timesyncd (→ `/etc/systemd/timesyncd.conf.d/cloudflare.conf`) |
+| `config/chrony.conf` | Ubuntu live boot | Full chrony config, NTP pinned to Cloudflare, DHCP/pool sources removed (→ `/etc/chrony/chrony.conf`) |
+| `config/no-connectivity-check.conf` | both | Disables the NM connectivity probe (→ `/etc/NetworkManager/conf.d/99-no-connectivity-check.conf`) |
+| `config/dns-over-tls-resolved.conf` | Ubuntu | systemd-resolved DoT + DNSSEC config |
+| `config/dnsmasq-pi.conf` | Pi | dnsmasq DNSSEC + forward to 127.0.0.1:5300 |
+| `config/dnsmasq-pi.service` | Pi | dnsmasq unit pinned to the config above (→ `/etc/systemd/system/dnsmasq.service`) |
+| `config/stubby-pi.yml` | Pi | stubby DoT config (listens on 127.0.0.1:5300) |
+| `config/dot-proxy.py` | Pi bootstrap | Temporary Python DoT proxy, same port as stubby. A script, but kept in `config/` so `setup.sh` stays the sole entry point. |
 
 ## Platform detection
 

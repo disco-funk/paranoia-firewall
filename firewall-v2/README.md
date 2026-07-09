@@ -33,18 +33,16 @@ From a read-only mount of the media:
 
 ```bash
 sudo mount -o ro,noexec /dev/sdb /mnt/firewall
-cd /mnt/firewall
-sudo bash setup.sh
+sudo bash /mnt/firewall/setup.sh
 ```
 
 Or from a checkout:
 
 ```bash
-cd firewall-v2
-sudo bash setup.sh
+sudo bash firewall-v2/setup.sh
 ```
 
-`setup.sh` copies config files using paths relative to the working directory, so run it from the directory that contains them.
+`setup.sh` locates `config/` relative to itself, so the working directory does not matter and no `cd` is needed. It exits immediately if `config/` is missing beside it.
 
 Invoke it as `sudo bash setup.sh`, not `sudo ./setup.sh`. A floppy is FAT12 and carries no execute bit, and untrusted removable media is best mounted `noexec` — under either condition `./setup.sh` fails with "permission denied" while `bash setup.sh` reads the script as data and runs it.
 
@@ -70,19 +68,31 @@ Uses `dnsmasq` (must be pre-installed) for DNSSEC + local resolution, and `stubb
 
 ## Files
 
+```text
+firewall-v2/
+├── README.md
+├── CLAUDE.md
+├── setup.sh          <- the only thing you run
+└── config/           <- everything setup.sh installs
+```
+
+`setup.sh` resolves `config/` relative to its own location, not to your working directory, so it can be invoked by absolute path from anywhere.
+
 | File | Platform | Installed to | Purpose |
 | ---- | -------- | ------------ | ------- |
 | `setup.sh` | both | run in place | Orchestration script; run as root |
-| `nftables.conf` | both | `/etc/nftables.conf` | Firewall ruleset |
-| `90-custom-sysctl.conf` | both | `/etc/sysctl.d/90-custom.conf` | Kernel hardening |
-| `timesyncd-cloudflare.conf` | both | `/etc/systemd/timesyncd.conf.d/cloudflare.conf` | NTP pinned to Cloudflare |
-| `chrony.conf` | Ubuntu (live boot) | `/etc/chrony/chrony.conf` | Full chrony config; NTP pinned to Cloudflare, DHCP/pool sources removed |
-| `no-connectivity-check.conf` | both | `/etc/NetworkManager/conf.d/99-no-connectivity-check.conf` | Disables the NM connectivity probe |
-| `dns-over-tls-resolved.conf` | Ubuntu | `/etc/systemd/resolved.conf.d/dns-over-tls.conf` | systemd-resolved DoT + DNSSEC |
-| `dnsmasq-pi.conf` | Pi | `/etc/dnsmasq.d/dns-privacy.conf` | dnsmasq DNSSEC + forward to :5300 |
-| `dnsmasq-pi.service` | Pi | `/etc/systemd/system/dnsmasq.service` | dnsmasq unit pinned to the config above |
-| `stubby-pi.yml` | Pi | `/etc/stubby/stubby.yml` | stubby DoT config |
-| `dot-proxy.py` | Pi (bootstrap) | run in place | Temporary Python DoT proxy |
+| `config/nftables.conf` | both | `/etc/nftables.conf` | Firewall ruleset |
+| `config/90-custom-sysctl.conf` | both | `/etc/sysctl.d/90-custom.conf` | Kernel hardening |
+| `config/timesyncd-cloudflare.conf` | both | `/etc/systemd/timesyncd.conf.d/cloudflare.conf` | NTP pinned to Cloudflare |
+| `config/chrony.conf` | Ubuntu (live boot) | `/etc/chrony/chrony.conf` | Full chrony config; NTP pinned to Cloudflare, DHCP/pool sources removed |
+| `config/no-connectivity-check.conf` | both | `/etc/NetworkManager/conf.d/99-no-connectivity-check.conf` | Disables the NM connectivity probe |
+| `config/dns-over-tls-resolved.conf` | Ubuntu | `/etc/systemd/resolved.conf.d/dns-over-tls.conf` | systemd-resolved DoT + DNSSEC |
+| `config/dnsmasq-pi.conf` | Pi | `/etc/dnsmasq.d/dns-privacy.conf` | dnsmasq DNSSEC + forward to :5300 |
+| `config/dnsmasq-pi.service` | Pi | `/etc/systemd/system/dnsmasq.service` | dnsmasq unit pinned to the config above |
+| `config/stubby-pi.yml` | Pi | `/etc/stubby/stubby.yml` | stubby DoT config |
+| `config/dot-proxy.py` | Pi (bootstrap) | run in place | Temporary Python DoT proxy |
+
+`dot-proxy.py` is a script rather than a config file, but it lives in `config/` so that `setup.sh` is the single executable entry point in this directory.
 
 ## Outbound traffic allowed
 

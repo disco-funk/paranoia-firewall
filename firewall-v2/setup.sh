@@ -11,6 +11,17 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# Resolve config relative to this script, not the working directory, so the
+# script can be invoked by absolute path from anywhere. Read-only: nothing is
+# ever written back here.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG="${SCRIPT_DIR}/config"
+
+if [[ ! -d "$CONFIG" ]]; then
+    echo "ERROR: config directory not found at ${CONFIG}" >&2
+    exit 1
+fi
+
 # --- Platform detection ---
 # shellcheck source=/dev/null
 source /etc/os-release
@@ -54,8 +65,8 @@ echo "Making directories..."
 mkdir -p /etc/systemd/resolved.conf.d/
 
 echo "Copying shared configuration files..."
-cp ./90-custom-sysctl.conf /etc/sysctl.d/90-custom.conf
-cp ./nftables.conf /etc/nftables.conf
+cp "${CONFIG}/90-custom-sysctl.conf" /etc/sysctl.d/90-custom.conf
+cp "${CONFIG}/nftables.conf" /etc/nftables.conf
 
 echo "Applying kernel parameters and firewall rules..."
 sysctl -p /etc/sysctl.d/90-custom.conf
@@ -67,12 +78,12 @@ nft -f /etc/nftables.conf
 echo "Configuring NTP (Cloudflare time service)..."
 if command -v chronyd &>/dev/null; then
     echo "chrony detected — pinning chrony to Cloudflare."
-    cp ./chrony.conf /etc/chrony/chrony.conf
+    cp "${CONFIG}/chrony.conf" /etc/chrony/chrony.conf
     systemctl restart chrony 2>/dev/null || systemctl restart chronyd
 else
     echo "systemd-timesyncd path — pinning timesyncd to Cloudflare."
     mkdir -p /etc/systemd/timesyncd.conf.d/
-    cp ./timesyncd-cloudflare.conf /etc/systemd/timesyncd.conf.d/cloudflare.conf
+    cp "${CONFIG}/timesyncd-cloudflare.conf" /etc/systemd/timesyncd.conf.d/cloudflare.conf
     timedatectl set-ntp true
     systemctl restart systemd-timesyncd
 fi
@@ -82,7 +93,7 @@ HAS_STUBBY=false
 
 if [[ "$PLATFORM" == "ubuntu" ]]; then
     echo "Configuring systemd-resolved (DNS-over-TLS + DNSSEC)..."
-    cp ./dns-over-tls-resolved.conf /etc/systemd/resolved.conf.d/dns-over-tls.conf
+    cp "${CONFIG}/dns-over-tls-resolved.conf" /etc/systemd/resolved.conf.d/dns-over-tls.conf
 
     echo "Modifying connection..."
     nmcli connection modify "${CONN}" connection.dns-over-tls yes
@@ -103,7 +114,7 @@ else
         HAS_STUBBY=true
         echo "stubby found — configuring for DNS-over-TLS."
         mkdir -p /etc/stubby
-        cp ./stubby-pi.yml /etc/stubby/stubby.yml
+        cp "${CONFIG}/stubby-pi.yml" /etc/stubby/stubby.yml
     else
         echo "stubby not found — Python DoT proxy will bootstrap the connection, then stubby will be installed."
     fi
@@ -115,8 +126,8 @@ else
 
     echo "Configuring dnsmasq..."
     mkdir -p /etc/dnsmasq.d/
-    cp ./dnsmasq-pi.conf /etc/dnsmasq.d/dns-privacy.conf
-    cp ./dnsmasq-pi.service /etc/systemd/system/dnsmasq.service
+    cp "${CONFIG}/dnsmasq-pi.conf" /etc/dnsmasq.d/dns-privacy.conf
+    cp "${CONFIG}/dnsmasq-pi.service" /etc/systemd/system/dnsmasq.service
     systemctl daemon-reload
 
     echo "Modifying connection..."
@@ -132,7 +143,7 @@ else
     # Disable NM connectivity check via config file — more portable than
     # 'nmcli general connectivity-check set', which isn't available on all builds.
     mkdir -p /etc/NetworkManager/conf.d/
-    cp ./no-connectivity-check.conf /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
+    cp "${CONFIG}/no-connectivity-check.conf" /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
 
     echo "Enabling and restarting services..."
     systemctl enable nftables
@@ -167,7 +178,7 @@ if [[ "$PLATFORM" == "pi" ]] && ! $HAS_STUBBY; then
     # Kill any stale proxy left over from a previous failed run.
     pkill -f dot-proxy.py 2>/dev/null || true
     echo "Starting Python DoT proxy..."
-    python3 ./dot-proxy.py &
+    python3 "${CONFIG}/dot-proxy.py" &
     PROXY_PID=$!
     sleep 1
 
@@ -181,7 +192,7 @@ if [[ "$PLATFORM" == "pi" ]] && ! $HAS_STUBBY; then
     wait "${PROXY_PID}" 2>/dev/null || true
 
     mkdir -p /etc/stubby
-    cp ./stubby-pi.yml /etc/stubby/stubby.yml
+    cp "${CONFIG}/stubby-pi.yml" /etc/stubby/stubby.yml
     systemctl enable stubby
     systemctl start stubby
 fi
