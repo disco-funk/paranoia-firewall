@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nftables
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nftables
+
+      - name: shellcheck
+        run: |
+          shellcheck smoke-test.sh firewall-v2/setup.sh .github/scripts/check-invariants.sh
+          # SC2086 is suppressed for hardening.sh, not fixed: DOT_SERVERS holds two
+          # servers that must word-split into two arguments to `resolvectl dns`.
+          # The fix shellcheck suggests would break it. An inline disable directive
+          # is not an option -- constraint 8 forbids comments in firewall-v1/.
+          shellcheck -e SC2086 firewall-v1/hardening.sh
+
+      - name: Validate nftables rulesets parse
+        # -c checks the ruleset without committing it. Catches syntax errors and
+        # unknown expressions before anyone types the file onto a live host.
+        run: |
+          sudo nft -c -f firewall-v1/nftables.conf
+          sudo nft -c -f firewall-v2/config/nftables.conf
+
+      - name: Byte-compile the DoT proxy
+        run: python3 -m py_compile firewall-v2/config/dot-proxy.py
+
+      - name: Design invariants
+        run: bash .github/scripts/check-invariants.sh
+
+  ruleset:
+    name: Ruleset egress (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v1
+            ruleset: firewall-v1/nftables.conf
+          - version: v2
+            ruleset: firewall-v2/config/nftables.conf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve test hostnames before the firewall blocks DNS
+        # The ruleset drops port 53. Docker rewrites the container's resolv.conf
+        # to a public resolver (the host's 127.0.0.53 stub is unreachable from a
+        # container), so once the rules load, name resolution inside the
+        # container dies. Resolve here and inject via --add-host, otherwise the
+        # HTTP/HTTPS checks would fail for the wrong reason.
+        id: hosts
+        run: |
+          example_ip=$(getent ahostsv4 example.com | awk 'NR==1 {print $1}')
+          neverssl_ip=$(getent ahostsv4 neverssl.com | awk 'NR==1 {print $1}')
+          if [[ -z "$example_ip" || -z "$neverssl_ip" ]]; then
+            echo "Could not resolve test hostnames on the runner" >&2
+            exit 1
+          fi
+          echo "example=$example_ip" >> "$GITHUB_OUTPUT"
+          echo "neverssl=$neverssl_ip" >> "$GITHUB_OUTPUT"
+          echo "example.com=$example_ip neverssl.com=$neverssl_ip"
+
+      - name: Load ruleset and assert egress policy
+        # --privileged grants NET_ADMIN so nft can write the container's own
+        # network namespace. We deliberately do NOT run sysctl -p here:
+        # kernel.kptr_restrict, kernel.unprivileged_bpf_disabled and
+        # net.core.bpf_jit_harden are not namespaced, so applying them would
+        # mutate the runner's host kernel rather than test anything.
+        env:
+          RULESET: ${{ matrix.ruleset }}
+          FIREWALL_VERSION: ${{ matrix.version }}
+        run: |
+          docker run --rm --privileged \
+            --add-host "example.com:${{ steps.hosts.outputs.example }}" \
+            --add-host "neverssl.com:${{ steps.hosts.outputs.neverssl }}" \
+            -e RULESET \
+            -e FIREWALL_VERSION \
+            -v "$PWD:/repo" -w /repo \
+            ubuntu:24.04 \
+            bash -euo pipefail -c '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends \
+                nftables iproute2 iputils-ping netcat-openbsd dnsutils wget ca-certificates >/dev/null
+
+              echo "--- loading ${RULESET} ---"
+              nft -f "${RULESET}"
+              # sed, not head: head exits early, nft takes SIGPIPE, and
+              # pipefail would abort the script on a successful load.
+              nft list ruleset | sed -n "1,12p"
+              echo "..."
+
+              echo "--- smoke test: network section (${FIREWALL_VERSION}) ---"
+              bash smoke-test.sh network
+            '

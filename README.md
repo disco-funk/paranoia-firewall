@@ -106,10 +106,23 @@ sysctl -a | grep -E 'rp_filter|timestamps|tempaddr|conntrack_max'
 `smoke-test.sh` exercises a deployed host: it asserts DoT and DNSSEC are live, the expected sysctls are set, permitted egress works, and blocked egress fails.
 
 ```bash
-sudo bash smoke-test.sh
+sudo bash smoke-test.sh                        # everything, v1 host
+sudo FIREWALL_VERSION=v2 bash smoke-test.sh    # everything, v2 host
+sudo bash smoke-test.sh network                # egress policy only
+sudo bash smoke-test.sh config                 # host DNS/sysctl state only
 ```
 
-It targets **`firewall-v1/`**. Two of its assertions do not hold for `firewall-v2/` (which permits outbound ping, and reaches DNS via dnsmasq/stubby on the Pi), so adapt it before pointing it at a v2 host.
+The `config` section needs systemd-resolved running, so it is meaningful only on a real deployed host. The `network` section runs anywhere the ruleset is loaded. `FIREWALL_VERSION` defaults to `v1`; set it to `v2` because v2 permits outbound ping where v1 drops it.
+
+### Continuous integration
+
+Every push runs two jobs (`.github/workflows/ci.yml`):
+
+**Static checks** — shellcheck, an `nft -c -f` parse of both rulesets, a byte-compile of `dot-proxy.py`, and a set of design invariants. The invariant script mechanically enforces the security properties this project exists to provide: that port 53 appears nowhere (bare, inside a set, or as the `domain` keyword), that DoT is pinned to both Quad9 IPv4 addresses and never IPv6, that NTP is pinned to Cloudflare, that all three chains are default-drop, and that no inbound TCP port is opened.
+
+**Ruleset egress** — each ruleset is loaded into a privileged container's own network namespace, and `smoke-test.sh network` runs against the real internet, checking that DoT to Quad9 succeeds while port 53, DoT to other resolvers, and assorted other ports are dropped. Runs for v1 and v2 independently.
+
+CI does not run `setup.sh` or `sysctl -p`. `setup.sh` waits for DHCP, which Docker does not provide, and three of the sysctls are not network-namespaced, so a privileged container would mutate the runner's host kernel rather than test anything. Those paths still need a real machine.
 
 ## Design decisions
 

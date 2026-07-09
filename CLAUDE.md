@@ -73,7 +73,24 @@ Do not assume a rule present in one is present in the other.
 
 ## Testing
 
-`smoke-test.sh` (repo root) targets **`firewall-v1/`**. It asserts that outbound ICMP echo is blocked, which `firewall-v2/` deliberately permits, so it will report a failure if run against a v2 host. It also checks only the systemd-resolved DNS path. Do not treat it as a v2 test without adapting those assertions.
+`smoke-test.sh` (repo root) runs in two independent sections:
+
+```bash
+./smoke-test.sh config    # host state: resolved DoT/DNSSEC, resolv.conf, sysctls
+./smoke-test.sh network   # egress policy: what gets out, what is dropped
+./smoke-test.sh           # both (default)
+```
+
+Set `FIREWALL_VERSION=v2` for a v2 host — v2 permits outbound ping, v1 drops it, and the assertion flips accordingly. The default is `v1`. The `config` section needs a real deployed host (systemd-resolved must be running); the `network` section runs anywhere the ruleset is loaded, including a container.
+
+CI (`.github/workflows/ci.yml`) has two jobs:
+
+- **`lint`** — shellcheck, `nft -c -f` on both rulesets, byte-compiles `dot-proxy.py`, and runs `.github/scripts/check-invariants.sh`.
+- **`ruleset`** — loads each ruleset into a privileged container's own netns and runs `smoke-test.sh network` against the real internet, matrixed over v1 and v2.
+
+`check-invariants.sh` mechanically enforces the constraints above: no port 53 in any form (including inside a set, and the `domain` keyword), DoT pinned to both Quad9 IPv4 addresses and no IPv6, NTP pinned to both Cloudflare addresses, default-drop on all three chains, no inbound TCP ports, no comments in `firewall-v1/`, no `sudo` inside either script, and no stray files at the `firewall-v2/` top level. **If you change a constraint, change that script too** — otherwise CI will contradict this file.
+
+CI deliberately never runs `sysctl -p`. Three of the parameters (`kernel.kptr_restrict`, `kernel.unprivileged_bpf_disabled`, `net.core.bpf_jit_harden`) are not network-namespaced, so in a privileged container they would mutate the runner's host kernel instead of testing anything. Nor does CI run `setup.sh`: it waits for DHCP, which Docker does not provide. Those paths are only exercised on a real host.
 
 ## Deployment context
 
