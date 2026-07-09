@@ -98,6 +98,30 @@ jobs:
               apt-get install -y -qq --no-install-recommends \
                 nftables iproute2 iputils-ping netcat-openbsd dnsutils wget ca-certificates >/dev/null
 
+              # A "blocked" assertion against a target that is unreachable anyway
+              # proves nothing. Probe the red targets with no firewall loaded, so
+              # a vacuous assertion is visible rather than a silent green tick.
+              echo "--- baseline reachability, BEFORE any ruleset is loaded ---"
+              for t in 9.9.9.9:53 8.8.8.8:53 1.1.1.1:853 8.8.8.8:853 9.9.9.9:22 9.9.9.9:25 9.9.9.9:8080; do
+                  h=${t%:*}; p=${t##*:}
+                  if timeout 5 nc -z "$h" "$p" 2>/dev/null; then
+                      echo "  reachable    ${t}"
+                  else
+                      echo "  UNREACHABLE  ${t}  <- a later blocked-assertion on this target is vacuous"
+                  fi
+              done
+
+              # These two must be reachable, or the checks that matter most --
+              # plain DNS dropped, DoT to a rogue resolver dropped -- assert nothing.
+              for t in 9.9.9.9:53 8.8.8.8:853; do
+                  h=${t%:*}; p=${t##*:}
+                  if ! timeout 5 nc -z "$h" "$p" 2>/dev/null; then
+                      echo "ERROR: ${t} unreachable before the firewall loaded." >&2
+                      echo "The corresponding blocked-assertion would pass vacuously." >&2
+                      exit 1
+                  fi
+              done
+
               echo "--- loading ${RULESET} ---"
               nft -f "${RULESET}"
               # sed, not head: head exits early, nft takes SIGPIPE, and
