@@ -33,8 +33,8 @@ check "sysctl log_martians=1"            bash -c  '[[ $(sysctl -n net.ipv4.conf.
 
 echo "=== green: must reach ==="
 check "stub resolves example.com"         resolvectl query example.com
-check "http outbound port 80"             curl -sSo /dev/null --max-time 10 http://neverssl.com/
-check "https outbound port 443"           curl -sSo /dev/null --max-time 10 https://example.com/
+check "http outbound port 80"             wget -q -O /dev/null --timeout=10 --tries=1 http://neverssl.com/
+check "https outbound port 443"           wget -q -O /dev/null --timeout=10 --tries=1 https://example.com/
 check "DoT 9.9.9.9:853"                  nc -z -w 5 9.9.9.9 853
 check "DoT 149.112.112.112:853"          nc -z -w 5 149.112.112.112 853
 
