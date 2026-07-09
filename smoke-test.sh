@@ -73,7 +73,10 @@ run_config() {
 
 run_network() {
     echo "=== green: must reach (${FIREWALL_VERSION}) ==="
-    check "http outbound port 80"             wget -q -O /dev/null --timeout=10 --tries=1 http://neverssl.com/
+    # example.com serves both 80 and 443, so one host covers both checks. It was
+    # neverssl.com for port 80, which turned out to go down often enough to make
+    # CI red for reasons unrelated to the firewall.
+    check "http outbound port 80"             wget -q -O /dev/null --timeout=10 --tries=1 http://example.com/
     check "https outbound port 443"           wget -q -O /dev/null --timeout=10 --tries=1 https://example.com/
     check "DoT 9.9.9.9:853"                  nc -z -w 5 9.9.9.9 853
     check "DoT 149.112.112.112:853"          nc -z -w 5 149.112.112.112 853

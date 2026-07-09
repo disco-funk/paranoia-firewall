@@ -60,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Resolve test hostnames before the firewall blocks DNS
+      - name: Resolve test hostname before the firewall blocks DNS
         # The ruleset drops port 53. Docker rewrites the container's resolv.conf
         # to a public resolver (the host's 127.0.0.53 stub is unreachable from a
         # container), so once the rules load, name resolution inside the
@@ -69,14 +69,12 @@ jobs:
         id: hosts
         run: |
           example_ip=$(getent ahostsv4 example.com | awk 'NR==1 {print $1}')
-          neverssl_ip=$(getent ahostsv4 neverssl.com | awk 'NR==1 {print $1}')
-          if [[ -z "$example_ip" || -z "$neverssl_ip" ]]; then
-            echo "Could not resolve test hostnames on the runner" >&2
+          if [[ -z "$example_ip" ]]; then
+            echo "Could not resolve example.com on the runner" >&2
             exit 1
           fi
           echo "example=$example_ip" >> "$GITHUB_OUTPUT"
-          echo "neverssl=$neverssl_ip" >> "$GITHUB_OUTPUT"
-          echo "example.com=$example_ip neverssl.com=$neverssl_ip"
+          echo "example.com=$example_ip"
 
       - name: Load ruleset and assert egress policy
         # --privileged grants NET_ADMIN so nft can write the container's own
@@ -90,7 +88,6 @@ jobs:
         run: |
           docker run --rm --privileged \
             --add-host "example.com:${{ steps.hosts.outputs.example }}" \
-            --add-host "neverssl.com:${{ steps.hosts.outputs.neverssl }}" \
             -e RULESET \
             -e FIREWALL_VERSION \
             -v "$PWD:/repo" -w /repo \
