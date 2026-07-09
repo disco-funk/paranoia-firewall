@@ -1,0 +1,12 @@
+[Unit]
+Description=Multipass allowances for the paranoia firewall
+After=nftables.service
+Requires=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/multipass-firewall.sh
+
+[Install]
+WantedBy=multi-user.target
