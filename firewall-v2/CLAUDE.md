@@ -31,6 +31,8 @@ Shell-based firewall hardening project for Ubuntu and Raspberry Pi. No build sys
 ## Key design decisions
 
 - **Air-gapped first:** Run `setup.sh` before any network connection. Don't change this.
+- **Runs from write-protected media:** This directory is intended to live on a physically write-protected disk (a 3.5" HD floppy with the tab open) and be executed from a read-only mount. `setup.sh` reads only from its own directory and writes solely under `/etc`. Never make it write into its source tree, drop state files beside itself, or assume its directory is writable. Scratch state belongs in `/run` or `/tmp`.
+- **Length is free here, unlike v1:** `../firewall-v1/` is retyped by hand and therefore forbids comments. v2 is copied from media, so comments and extra config files cost nothing. Keep `setup.sh` legible and commented.
 - **Default-deny everywhere:** INPUT, FORWARD, and OUTPUT chains all drop by default. Any new allowed traffic requires an explicit rule in `nftables.conf`.
 - **Quad9 only:** DNS locked to 9.9.9.9 and 149.112.112.112. No fallback — intentional to prevent leaks.
 - **No forwarding:** FORWARD chain drops everything. This machine is not a router.

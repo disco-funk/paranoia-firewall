@@ -1,14 +1,19 @@
 # Security Review — Paranoia Firewall
 
 **Reviewed:** 2026-04-30
-**Files reviewed:** `nftables.conf`, `hardening.sh`
-**Scope:** Host-level network hardening. Layer 2 (switch-enforced) controls are noted where relevant but are out of scope for this project.
+**Remediation status re-checked:** 2026-07-09
+**Files reviewed:** `firewall-v1/nftables.conf`, `firewall-v1/hardening.sh`
+**Scope:** `firewall-v1/` only. Host-level network hardening. Layer 2 (switch-enforced) controls are noted where relevant but are out of scope for this project.
+
+> This review predates the split of the repo into `firewall-v1/` and `firewall-v2/`. It examines the v1 files at their current paths. **`firewall-v2/` has not been reviewed** — it permits outbound ping and outbound SSH to a pinned GitHub IP set, neither of which is assessed below.
+
+Findings 1, 2, 3 and 6 have since been remediated in `firewall-v1/`; each is marked **Resolved** with the fix in place. They are retained rather than deleted so the reasoning stays on record. Findings 4, 5 and 7 remain open, and 4 and 5 are accepted residual risk.
 
 ---
 
 ## Posture summary
 
-The ruleset provides a strong baseline for a client host on an untrusted or CGNAT network. Default-drop on all three chains (input, forward, output), mandatory DoT+DNSSEC pinned to specific Quad9 IPs, empty `FallbackDNS`, and strict reverse-path filtering together close the most common network-layer attack paths before the cable is plugged in. Several gaps remain; they are catalogued below in order of severity.
+The ruleset provides a strong baseline for a client host on an untrusted or CGNAT network. Default-drop on all three chains (input, forward, output), mandatory DoT+DNSSEC pinned to specific Quad9 IPs, empty `FallbackDNS`, NTP pinned to Cloudflare, and strict reverse-path filtering together close the most common network-layer attack paths before the cable is plugged in. The remaining gaps are catalogued below in order of severity.
 
 ---
 
@@ -23,36 +28,46 @@ The ruleset provides a strong baseline for a client host on an untrusted or CGNA
 | DNSSEC bypass | `DNSSEC=yes` | Strong |
 | Rogue DoT resolver | DoT restricted to `9.9.9.9`, `149.112.112.112` only | Strong |
 | DNS fallback to untrusted resolver | `FallbackDNS=` (empty) | Strong |
+| Clock manipulation via LAN time source | NTP pinned to Cloudflare IPs; `FallbackNTP=` empty | Strong |
 | IP source address spoofing | `rp_filter=1` (strict reverse-path filtering) | Strong |
+| ICMP redirect route hijacking | `accept_redirects=0`, `send_redirects=0` | Strong |
+| IP source routing | `accept_source_route=0` (IPv4 + IPv6) | Strong |
+| Local privilege escalation via BPF | `unprivileged_bpf_disabled=1`, `bpf_jit_harden=2` | Strong |
+| Kernel address disclosure | `kptr_restrict=2` | Strong |
 | TCP fingerprinting via timestamps | `tcp_timestamps=0` | Strong |
 | IPv6 address tracking / correlation | `use_tempaddr=2` (privacy extensions) | Strong |
 | Loopback spoofing from external interface | Explicit drop rules in input and output chains | Strong |
 | Inbound ICMP flood | Rate-limited to 10/second; error types only, no echo-request | Adequate |
+| SYN flood | `tcp_syncookies=1` | Adequate |
 | Conntrack exhaustion | `nf_conntrack_max=65536`; SYN-sent timeout reduced to 10 s | Adequate |
-| IPv6 router advertisement source | RA accepted only from `fe80::/10` link-local | Partial (see §5) |
+| IPv6 router advertisement source | RA accepted only from `fe80::/10` link-local | Partial (see §4) |
 | CGNAT exposure | No routable public IP; inbound new connections silently dropped | Adequate |
 
 ---
 
 ## Identified gaps and attack vectors
 
-### 1. No time synchronisation — clock drift will break TLS and DNSSEC (HIGH)
+### 1. No time synchronisation — clock drift will break TLS and DNSSEC (HIGH) — **Resolved**
+
+> **Resolved.** `firewall-v1/nftables.conf` now permits `udp dport 123` to `162.159.200.123` and `162.159.200.1` only, and `firewall-v1/hardening.sh` writes a `systemd-timesyncd` drop-in pinning `NTP=` to those same IPs with `FallbackNTP=` left empty. Original finding retained below.
 
 The output chain has no rule for NTP (UDP 123). `systemd-timesyncd`, which ships enabled by default on Debian/Ubuntu, requires UDP 123 and will fail silently. As the system clock drifts past the tolerance window for TLS certificate validity or DNSSEC signature expiry, both defences become inoperable — with no attacker action required.
 
 The fact that TCP 443 is open does not help: standard NTP and Network Time Security (NTS) do not run over TCP 443.
 
-**Proposed mitigation:** Pin outbound NTP to the static anycast IPs of a provider that maintains stable addresses, matching the same IP-pinning approach used for DoT. Cloudflare operates time servers at `162.159.200.123` and `162.159.200.1`; Quad9 at `9.9.9.9` also responds to NTP. A candidate nftables rule:
+**Mitigation applied:** Outbound NTP is pinned to the static anycast IPs of a provider that maintains stable addresses, matching the same IP-pinning approach used for DoT:
 
 ```nft
 udp dport 123 ip daddr { 162.159.200.123, 162.159.200.1 } counter accept
 ```
 
-Alternatively, chrony with NTS (TCP/UDP 4460) provides authenticated time sync and is harder to spoof, at the cost of opening port 4460 to a pinned server.
+Alternatively, chrony with NTS (TCP/UDP 4460) provides authenticated time sync and is harder to spoof, at the cost of opening port 4460 to a pinned server. `firewall-v2/` uses chrony where present, with the same Cloudflare IP pinning.
 
 ---
 
-### 2. ICMP redirects and IP source routing not disabled (MEDIUM)
+### 2. ICMP redirects and IP source routing not disabled (MEDIUM) — **Resolved**
+
+> **Resolved.** All ten sysctl entries listed below are now present in `firewall-v1/hardening.sh`. Original finding retained below.
 
 Two classes of kernel-level routing manipulation are not blocked by sysctl:
 
@@ -62,7 +77,7 @@ Two classes of kernel-level routing manipulation are not blocked by sysctl:
 
 **Also missing:** `send_redirects = 0`. A client host should never send ICMP redirects; leaving this enabled leaks routing topology information.
 
-**Proposed additions to `hardening.sh`:**
+**Additions applied to `firewall-v1/hardening.sh`:**
 
 ```text
 net.ipv4.conf.all.accept_redirects = 0
@@ -79,7 +94,9 @@ net.ipv6.conf.default.accept_source_route = 0
 
 ---
 
-### 3. Missing kernel hardening parameters (MEDIUM)
+### 3. Missing kernel hardening parameters (MEDIUM) — **Resolved**
+
+> **Resolved.** All five parameters are now set in `firewall-v1/hardening.sh`. Original finding retained below.
 
 Several kernel tunables that reduce local privilege escalation attack surface and close information-disclosure paths are absent from the current sysctl conf:
 
@@ -95,7 +112,7 @@ Note on `icmp_echo_ignore_broadcasts`: modern kernels default this to `1`, so th
 
 ---
 
-### 4. IPv6 rogue Router Advertisement injection (MEDIUM — partially unmitigatable at host level)
+### 4. IPv6 rogue Router Advertisement injection (MEDIUM — partially unmitigatable at host level) — **Open, accepted**
 
 The input chain accepts `nd-router-advert` from any link-local source (`fe80::/10`). NDP provides no authentication, so on a shared CGNAT segment a co-located attacker can broadcast forged RA packets to:
 
@@ -108,7 +125,7 @@ The host cannot distinguish a legitimate RA from a forged one because both arriv
 
 ---
 
-### 5. ARP poisoning and DHCP spoofing (MEDIUM — unmitigatable at host layer)
+### 5. ARP poisoning and DHCP spoofing (MEDIUM — unmitigatable at host layer) — **Open, accepted**
 
 An attacker on the same L2 segment can:
 
@@ -119,11 +136,13 @@ Mitigations require Dynamic ARP Inspection (DAI) and DHCP snooping at the networ
 
 ---
 
-### 6. `ct state invalid` drop ordering (LOW)
+### 6. `ct state invalid` drop ordering (LOW) — **Resolved**
+
+> **Resolved.** The `ct_base` chain in `firewall-v1/nftables.conf` now drops invalid before accepting established/related. `firewall-v2/` expresses the same ordering via a `ct state vmap`.
 
 In both the input and output chains, `ct state { established, related } accept` appears before `ct state invalid drop`. Conntrack states are mutually exclusive, so in practice no packet can match both rules and the behaviour is correct. However, the canonical safe ordering — drop invalid first — is the convention recommended by the nftables project and avoids any theoretical edge case in conntrack state assignment by a module loaded after the base ruleset.
 
-**Proposed reordering in both chains:**
+**Reordering applied in `ct_base`:**
 
 ```nft
 ct state invalid counter drop
@@ -132,11 +151,22 @@ ct state { established, related } counter accept
 
 ---
 
-### 7. Unrestricted HTTP/HTTPS egress (LOW — accepted design tradeoff)
+### 7. Unrestricted HTTP/HTTPS egress (LOW — accepted design tradeoff) — **Open, accepted**
 
 `tcp dport { 80, 443 }` allows outbound connections to any destination with no restriction on the initiating process. Any software installed on the host — including malware — can use these ports for command-and-control or data exfiltration. The README acknowledges this tradeoff; HTTP in particular is noted as debatable.
 
 **Potential mitigation (out of scope for current "minimal" design):** An outbound application-layer proxy with a destination allowlist, or a host-based firewall with per-UID/GID connmark rules to restrict which users can initiate outbound HTTP/HTTPS. Both are meaningful additions to the threat model but require ongoing maintenance.
+
+---
+
+## Not yet reviewed — `firewall-v2/`
+
+`firewall-v2/` broadens the egress and ingress policy relative to v1 and has not been assessed. A future review should cover at minimum:
+
+- **Outbound TCP 22 to `@github_ips`.** A hardcoded IP set for a third-party service. GitHub rotates these addresses; a stale set fails closed (git breaks), but the rule widens egress to a set the operator does not control.
+- **Outbound ICMP echo-request to any destination.** Permits ping as a low-bandwidth exfiltration or beaconing channel.
+- **Inbound ICMP echo-request from `192.168.0.0/24`.** A hardcoded RFC 1918 range that may not match the deployed LAN, and which an attacker on the segment can trivially source-spoof.
+- **The Pi bootstrap window.** `dot-proxy.py` terminates TLS to Quad9 in Python during `apt-get install stubby`, with the NM connectivity check disabled. The proxy's certificate validation behaviour should be verified.
 
 ---
 
@@ -154,12 +184,16 @@ The following are documented design choices, not defects:
 
 ## Issue tracker
 
-| Issue | Title | Severity |
-| --- | --- | --- |
-| [#5](https://github.com/disco-funk/paranoia-firewall/issues/5) | NTP blocked — clock drift will break TLS/DNSSEC | High |
-| [#6](https://github.com/disco-funk/paranoia-firewall/issues/6) | Missing sysctl: ICMP redirects, source routing, kernel hardening | Medium |
-| [#7](https://github.com/disco-funk/paranoia-firewall/issues/7) | `ct state invalid` drop should precede `established/related` accept | Low |
-| [#1](https://github.com/disco-funk/paranoia-firewall/issues/1) | DHCP unicast renewal blocked by output rule | Medium |
-| [#2](https://github.com/disco-funk/paranoia-firewall/issues/2) | Interface detection fails when run before network connection | Medium |
-| [#3](https://github.com/disco-funk/paranoia-firewall/issues/3) | sysctl error when running hardening.sh | Low |
-| [#4](https://github.com/disco-funk/paranoia-firewall/issues/4) | DNS-over-TLS lookup succeeds but cannot wget a webpage | Medium |
+All tracked issues are closed as of 2026-07-09.
+
+| Issue | Title | Severity | Status |
+| --- | --- | --- | --- |
+| [#5](https://github.com/disco-funk/paranoia-firewall/issues/5) | NTP blocked — clock drift will break TLS/DNSSEC | High | Closed |
+| [#6](https://github.com/disco-funk/paranoia-firewall/issues/6) | Missing sysctl: ICMP redirects, source routing, kernel hardening | Medium | Closed |
+| [#7](https://github.com/disco-funk/paranoia-firewall/issues/7) | `ct state invalid` drop should precede `established/related` accept | Low | Closed |
+| [#1](https://github.com/disco-funk/paranoia-firewall/issues/1) | DHCP unicast renewal blocked by output rule | Medium | Closed |
+| [#2](https://github.com/disco-funk/paranoia-firewall/issues/2) | Interface detection fails when run before network connection | Medium | Closed |
+| [#3](https://github.com/disco-funk/paranoia-firewall/issues/3) | sysctl error when running hardening.sh | Low | Closed |
+| [#4](https://github.com/disco-funk/paranoia-firewall/issues/4) | DNS-over-TLS lookup succeeds but cannot wget a webpage | Medium | Closed |
+
+The remaining open risks are §4 (rogue IPv6 RA) and §5 (ARP/DHCP spoofing) — both accepted, both unmitigatable at the host layer — plus §7 (unrestricted HTTP/HTTPS egress), an accepted design tradeoff.
