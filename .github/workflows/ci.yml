@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install nftables
         run: |
@@ -58,7 +58,7 @@ jobs:
           - version: v2
             ruleset: firewall-v2/config/nftables.conf
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Resolve test hostnames before the firewall blocks DNS
         # The ruleset drops port 53. Docker rewrites the container's resolv.conf

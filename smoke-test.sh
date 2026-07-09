@@ -47,6 +47,10 @@ have_global_ipv6() {
     ip -6 addr show scope global 2>/dev/null | grep -q inet6
 }
 
+default_gateway() {
+    ip route show default 2>/dev/null | awk 'NR==1 {print $3}'
+}
+
 run_config() {
     local IFACE
     IFACE=$(ip route show default 2>/dev/null | awk 'NR==1 {print $5}')
@@ -98,10 +102,21 @@ run_network() {
     check_blocked "port 8080 outbound"                  timeout 5 nc -z    9.9.9.9    8080
 
     # v1 drops outbound echo-request; v2 accepts it.
-    if [[ "$FIREWALL_VERSION" == "v2" ]]; then
-        check         "ICMP echo outbound allowed"      timeout 5 ping -c 1 -W 3 9.9.9.9
+    #
+    # Ping the default gateway, not a public address. Many networks -- including
+    # the Azure-hosted GitHub Actions runners -- drop ICMP to the internet
+    # regardless of any local firewall, which would make the v1 "blocked"
+    # assertion pass for the wrong reason and the v2 "allowed" one fail for the
+    # wrong reason. The gateway is inside our own segment, so what is measured
+    # here is the output chain and nothing else.
+    local gw
+    gw=$(default_gateway)
+    if [[ -z "$gw" ]]; then
+        skip "ICMP echo outbound" "no default gateway"
+    elif [[ "$FIREWALL_VERSION" == "v2" ]]; then
+        check         "ICMP echo outbound allowed (gw ${gw})"  timeout 5 ping -c 1 -W 3 "$gw"
     else
-        check_blocked "ICMP echo outbound blocked"      timeout 5 ping -c 1 -W 3 9.9.9.9
+        check_blocked "ICMP echo outbound blocked (gw ${gw})"  timeout 5 ping -c 1 -W 3 "$gw"
     fi
 }
 
