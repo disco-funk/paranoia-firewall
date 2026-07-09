@@ -31,6 +31,7 @@ Shell-based firewall hardening project for Ubuntu and Raspberry Pi. No build sys
 ## Key design decisions
 
 - **Air-gapped first:** Run `setup.sh` before any network connection. Don't change this.
+- **Root once, never inline `sudo`:** `setup.sh` asserts `EUID -eq 0` and exits otherwise. It contains no `sudo` calls. Do not add any back — the script blocks on a clock prompt and on waiting for the cable, and sudo's 15-minute credential timestamp would expire mid-run, prompting for a password after the network is up and the connectivity check is disabled. Invoke as `sudo bash setup.sh` (not `./setup.sh`: the media is FAT12 and should be mounted `ro,noexec`).
 - **Runs from write-protected media:** This directory is intended to live on a physically write-protected disk (a 3.5" HD floppy with the tab open) and be executed from a read-only mount. `setup.sh` reads only from its own directory and writes solely under `/etc`. Never make it write into its source tree, drop state files beside itself, or assume its directory is writable. Scratch state belongs in `/run` or `/tmp`.
 - **Length is free here, unlike v1:** `../firewall-v1/` is retyped by hand and therefore forbids comments. v2 is copied from media, so comments and extra config files cost nothing. Keep `setup.sh` legible and commented.
 - **Default-deny everywhere:** INPUT, FORWARD, and OUTPUT chains all drop by default. Any new allowed traffic requires an explicit rule in `nftables.conf`.

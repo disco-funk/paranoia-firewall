@@ -49,6 +49,14 @@ These hold across **both** generations unless noted.
 7. **NTP pinned by IP.** Outbound UDP 123 is restricted to the Cloudflare time servers `162.159.200.123` and `162.159.200.1`. An untrusted LAN must not be able to steer the clock — a wrong clock breaks TLS certificate validation and DNSSEC signature checks.
 8. **No comments — `firewall-v1/` only.** Both v1 files are typed by hand on the target machine, so every comment line is extra transcription with no runtime value. Do not add comment lines to `firewall-v1/nftables.conf` or `firewall-v1/hardening.sh`, including inside heredocs. **This rule does not apply to `firewall-v2/`**, which is copied from media rather than retyped; its `setup.sh` is deliberately commented and those comments should be preserved and maintained.
 9. **`firewall-v2/` must run from read-only media.** `setup.sh` reads only from its own directory and writes solely to `/etc`. Never make it write into its source tree, create dotfiles or state alongside itself, or assume its directory is writable — it may be executing off a write-protected floppy. Scratch state goes in `/run` or `/tmp`.
+10. **Elevate once, at the top. Never `sudo` inside a script.** Both scripts require root and assert it. Do not reintroduce per-command `sudo`, however natural it looks:
+    - Both scripts block indefinitely — on a clock-confirmation prompt, and on waiting for the ethernet cable. `sudo`'s credential timestamp (`timestamp_timeout`, 15 min default) will expire across those waits, and the next `sudo` then prompts for a password *after* the cable is in, during the Pi bootstrap window with the NM connectivity check disabled. An unattended machine sits networked and half-configured.
+    - A partially applied security config is the failure mode that matters most here. Elevating once removes the possibility.
+    - Minimal Debian and Pi OS Lite images frequently have no `sudo` installed; inline `sudo` fails outright when you are already root.
+    - Backgrounding under `sudo` captures the PID of `sudo`, not of the child. `sudo python3 dot-proxy.py & PROXY_PID=$!` is a latent bug; without `sudo` it is correct.
+    - Unelevated commands (`nmcli`, `awk`, `grep`) inherit the caller's `PATH` and their output steers later privileged actions. Running the whole script under `sudo` applies `secure_path` and `env_reset` once, deterministically.
+
+    Invoke as `sudo bash setup.sh` rather than `sudo ./setup.sh`: the intended media is FAT12 (no execute bit) and untrusted removable media should be mounted `ro,noexec`, under which `./setup.sh` fails but `bash setup.sh` works.
 
 ## Where the two generations differ
 
@@ -87,7 +95,7 @@ If the user asks to add any of these, they are in scope but are deliberate addit
 ## Tone / style
 
 - Shell scripts: `set -euo pipefail`
-- `firewall-v1/hardening.sh` takes no `sudo` internally — the caller must already be root. `firewall-v2/setup.sh` calls `sudo` per command by design; do not strip it.
+- No `sudo` inside either script. Both require root and must be invoked as `sudo bash <script>`; `setup.sh` asserts `EUID -eq 0` and refuses otherwise. Elevating once is deliberate — see constraint 10.
 - nftables: prefer `inet` tables for dual-stack; use `counter` on every terminal rule for observability
 - v1: terse, no comments, no niceties — it is retyped by hand. v2: legible and commented — it is copied from media.
 - No feature flags, no backwards-compat shims — this is a security config, not a library

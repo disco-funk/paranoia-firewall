@@ -25,14 +25,14 @@ If you have no such media, use [`../firewall-v1/`](../firewall-v1/) instead: it 
 
 - Ubuntu or Raspberry Pi OS (Debian-based)
 - NetworkManager (`nmcli`) managing the active connection
-- `sudo` / root access
+- Root access. `setup.sh` must run as root and refuses to start otherwise; it contains no internal `sudo` calls, so it works on minimal images where `sudo` is not installed.
 
 ## Usage
 
 From a read-only mount of the media:
 
 ```bash
-sudo mount -o ro /dev/sdb /mnt/firewall
+sudo mount -o ro,noexec /dev/sdb /mnt/firewall
 cd /mnt/firewall
 sudo bash setup.sh
 ```
@@ -45,6 +45,10 @@ sudo bash setup.sh
 ```
 
 `setup.sh` copies config files using paths relative to the working directory, so run it from the directory that contains them.
+
+Invoke it as `sudo bash setup.sh`, not `sudo ./setup.sh`. A floppy is FAT12 and carries no execute bit, and untrusted removable media is best mounted `noexec` — under either condition `./setup.sh` fails with "permission denied" while `bash setup.sh` reads the script as data and runs it.
+
+The script elevates once rather than calling `sudo` per command. It waits on a clock confirmation and on you plugging the cable in, and a per-command `sudo` would let its credential timestamp lapse across those waits — prompting for a password after the network is live and the connectivity check is disabled.
 
 The script auto-detects the distro and active ethernet connection, deploys configs, and waits for the ethernet cable to be plugged in. It prints a status summary when done.
 

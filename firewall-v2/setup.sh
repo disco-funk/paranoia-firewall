@@ -1,13 +1,22 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
+
+# Everything below this line needs root. Elevate once, here, rather than calling
+# sudo per command: the script blocks indefinitely waiting for the clock check
+# and the ethernet cable, and sudo's credential timestamp would expire in the
+# middle of the Pi bootstrap window with the network already up.
+if [[ $EUID -ne 0 ]]; then
+    echo "ERROR: setup.sh must run as root. Run: sudo bash setup.sh" >&2
+    exit 1
+fi
 
 # --- Platform detection ---
 # shellcheck source=/dev/null
 source /etc/os-release
 
 PLATFORM="unsupported"
-case "$ID" in
+case "${ID:-}" in
     ubuntu)   PLATFORM="ubuntu" ;;
     raspbian) PLATFORM="pi" ;;
     debian)
@@ -17,9 +26,9 @@ case "$ID" in
         ;;
 esac
 
-echo "Detected platform: ${PLATFORM} (distro: ${ID})"
+echo "Detected platform: ${PLATFORM} (distro: ${ID:-unknown})"
 if [[ "$PLATFORM" == "unsupported" ]]; then
-    echo "ERROR: Unsupported distro '${ID}'. This script supports Ubuntu and Raspberry Pi OS."
+    echo "ERROR: Unsupported distro '${ID:-unknown}'. This script supports Ubuntu and Raspberry Pi OS."
     exit 1
 fi
 
@@ -27,26 +36,30 @@ fi
 # The Pi 4 has no RTC, and an Ubuntu live boot may also carry a bad clock —
 # both run air-gapped here, so verify on every platform before anything else.
 echo "System date/time: $(date)"
-read -r -p "If this looks wrong, press Ctrl-C now and fix with: sudo timedatectl set-time 'YYYY-MM-DD HH:MM:SS' — otherwise press Enter to continue: "
+read -r -p "If this looks wrong, press Ctrl-C now and fix with: timedatectl set-time 'YYYY-MM-DD HH:MM:SS' — otherwise press Enter to continue: "
 
 # --- Connection detection ---
 CONN=$(nmcli -g NAME,TYPE connection | awk -F : '/.*ethernet.*/ { print $1 }')
+if [[ -z "$CONN" ]]; then
+    echo "ERROR: No ethernet connection found via nmcli. NetworkManager must manage the interface." >&2
+    exit 1
+fi
 echo "Using connection: ${CONN}"
 
 # --- Shared: kernel hardening and firewall ---
 echo "Loading nf_conntrack module..."
-sudo modprobe nf_conntrack
+modprobe nf_conntrack
 
 echo "Making directories..."
-sudo mkdir -p /etc/systemd/resolved.conf.d/
+mkdir -p /etc/systemd/resolved.conf.d/
 
 echo "Copying shared configuration files..."
-sudo cp ./90-custom-sysctl.conf /etc/sysctl.d/90-custom.conf
-sudo cp ./nftables.conf /etc/nftables.conf
+cp ./90-custom-sysctl.conf /etc/sysctl.d/90-custom.conf
+cp ./nftables.conf /etc/nftables.conf
 
 echo "Applying kernel parameters and firewall rules..."
-sudo sysctl -p /etc/sysctl.d/90-custom.conf
-sudo nft -f /etc/nftables.conf
+sysctl -p /etc/sysctl.d/90-custom.conf
+nft -f /etc/nftables.conf
 
 # NTP daemon varies by platform: systemd-timesyncd on the Pi and most Ubuntu
 # installs, but the Ubuntu 26.04 live boot ships chrony. Configure whichever is
@@ -54,14 +67,14 @@ sudo nft -f /etc/nftables.conf
 echo "Configuring NTP (Cloudflare time service)..."
 if command -v chronyd &>/dev/null; then
     echo "chrony detected — pinning chrony to Cloudflare."
-    sudo cp ./chrony.conf /etc/chrony/chrony.conf
-    sudo systemctl restart chrony 2>/dev/null || sudo systemctl restart chronyd
+    cp ./chrony.conf /etc/chrony/chrony.conf
+    systemctl restart chrony 2>/dev/null || systemctl restart chronyd
 else
     echo "systemd-timesyncd path — pinning timesyncd to Cloudflare."
-    sudo mkdir -p /etc/systemd/timesyncd.conf.d/
-    sudo cp ./timesyncd-cloudflare.conf /etc/systemd/timesyncd.conf.d/cloudflare.conf
-    sudo timedatectl set-ntp true
-    sudo systemctl restart systemd-timesyncd
+    mkdir -p /etc/systemd/timesyncd.conf.d/
+    cp ./timesyncd-cloudflare.conf /etc/systemd/timesyncd.conf.d/cloudflare.conf
+    timedatectl set-ntp true
+    systemctl restart systemd-timesyncd
 fi
 
 # --- Platform-specific DNS configuration ---
@@ -69,7 +82,7 @@ HAS_STUBBY=false
 
 if [[ "$PLATFORM" == "ubuntu" ]]; then
     echo "Configuring systemd-resolved (DNS-over-TLS + DNSSEC)..."
-    sudo cp ./dns-over-tls-resolved.conf /etc/systemd/resolved.conf.d/dns-over-tls.conf
+    cp ./dns-over-tls-resolved.conf /etc/systemd/resolved.conf.d/dns-over-tls.conf
 
     echo "Modifying connection..."
     nmcli connection modify "${CONN}" connection.dns-over-tls yes
@@ -78,19 +91,19 @@ if [[ "$PLATFORM" == "ubuntu" ]]; then
     nmcli connection modify "${CONN}" ipv4.dns 9.9.9.9#dns.quad9.net,149.112.112.112#dns.quad9.net
 
     echo "Enabling and restarting services..."
-    sudo systemctl enable nftables
-    sudo systemctl restart systemd-sysctl
-    sudo systemctl restart systemd-resolved
-    sudo systemctl restart nftables
-    sudo systemctl restart NetworkManager
+    systemctl enable nftables
+    systemctl restart systemd-sysctl
+    systemctl restart systemd-resolved
+    systemctl restart nftables
+    systemctl restart NetworkManager
 
 else
     # --- Raspberry Pi path ---
     if command -v stubby &>/dev/null; then
         HAS_STUBBY=true
         echo "stubby found — configuring for DNS-over-TLS."
-        sudo mkdir -p /etc/stubby
-        sudo cp ./stubby-pi.yml /etc/stubby/stubby.yml
+        mkdir -p /etc/stubby
+        cp ./stubby-pi.yml /etc/stubby/stubby.yml
     else
         echo "stubby not found — Python DoT proxy will bootstrap the connection, then stubby will be installed."
     fi
@@ -101,10 +114,10 @@ else
     fi
 
     echo "Configuring dnsmasq..."
-    sudo mkdir -p /etc/dnsmasq.d/
-    sudo cp ./dnsmasq-pi.conf /etc/dnsmasq.d/dns-privacy.conf
-    sudo cp ./dnsmasq-pi.service /etc/systemd/system/dnsmasq.service
-    sudo systemctl daemon-reload
+    mkdir -p /etc/dnsmasq.d/
+    cp ./dnsmasq-pi.conf /etc/dnsmasq.d/dns-privacy.conf
+    cp ./dnsmasq-pi.service /etc/systemd/system/dnsmasq.service
+    systemctl daemon-reload
 
     echo "Modifying connection..."
     nmcli connection modify "${CONN}" ipv6.method link-local
@@ -114,24 +127,24 @@ else
     # Stop background services that race for the apt lock or react to network-up events.
     # These are timer-driven and will resume normally on next schedule after reboot.
     echo "Quiescing apt timers and NM connectivity check before network comes up..."
-    sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-    sudo systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+    systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+    systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
     # Disable NM connectivity check via config file — more portable than
     # 'nmcli general connectivity-check set', which isn't available on all builds.
-    sudo mkdir -p /etc/NetworkManager/conf.d/
-    sudo cp ./no-connectivity-check.conf /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
+    mkdir -p /etc/NetworkManager/conf.d/
+    cp ./no-connectivity-check.conf /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
 
     echo "Enabling and restarting services..."
-    sudo systemctl enable nftables
-    sudo systemctl restart systemd-sysctl
-    sudo systemctl restart nftables
+    systemctl enable nftables
+    systemctl restart systemd-sysctl
+    systemctl restart nftables
     if $HAS_STUBBY; then
-        sudo systemctl enable stubby
-        sudo systemctl restart stubby
+        systemctl enable stubby
+        systemctl restart stubby
     fi
-    sudo systemctl enable dnsmasq
-    sudo systemctl restart dnsmasq
-    sudo systemctl restart NetworkManager
+    systemctl enable dnsmasq
+    systemctl restart dnsmasq
+    systemctl restart NetworkManager
 fi
 
 # --- Wait for ethernet connection ---
@@ -152,33 +165,33 @@ done
 # --- Pi bootstrap: use Python DoT proxy to install stubby, then replace it ---
 if [[ "$PLATFORM" == "pi" ]] && ! $HAS_STUBBY; then
     # Kill any stale proxy left over from a previous failed run.
-    sudo pkill -f dot-proxy.py 2>/dev/null || true
+    pkill -f dot-proxy.py 2>/dev/null || true
     echo "Starting Python DoT proxy..."
-    sudo python3 ./dot-proxy.py &
+    python3 ./dot-proxy.py &
     PROXY_PID=$!
     sleep 1
 
     echo "Refreshing package lists..."
-    sudo apt-get update
+    apt-get update
     echo "Installing stubby via proxy..."
-    sudo apt-get install -y stubby
+    apt-get install -y stubby
 
     echo "Stubby installed. Stopping proxy and switching over..."
-    sudo kill "${PROXY_PID}" 2>/dev/null || true
+    kill "${PROXY_PID}" 2>/dev/null || true
     wait "${PROXY_PID}" 2>/dev/null || true
 
-    sudo mkdir -p /etc/stubby
-    sudo cp ./stubby-pi.yml /etc/stubby/stubby.yml
-    sudo systemctl enable stubby
-    sudo systemctl start stubby
+    mkdir -p /etc/stubby
+    cp ./stubby-pi.yml /etc/stubby/stubby.yml
+    systemctl enable stubby
+    systemctl start stubby
 fi
 
 # --- Re-enable background services on Pi ---
 if [[ "$PLATFORM" == "pi" ]]; then
     echo "Re-enabling background services..."
-    sudo systemctl start apt-daily.timer apt-daily-upgrade.timer
-    sudo rm -f /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
-    sudo systemctl reload NetworkManager
+    systemctl start apt-daily.timer apt-daily-upgrade.timer
+    rm -f /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
+    systemctl reload NetworkManager
 fi
 
 # --- Status ---
@@ -194,4 +207,4 @@ else
         || echo "(install dnsutils for a DNS check)"
 fi
 
-sudo nft list ruleset
+nft list ruleset
