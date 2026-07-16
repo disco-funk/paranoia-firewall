@@ -81,7 +81,7 @@ Do not assume a rule present in one is present in the other.
 ./smoke-test.sh           # both (default)
 ```
 
-Set `FIREWALL_VERSION=v2` for a v2 host — v2 permits outbound ping, v1 drops it, and the assertion flips accordingly. The default is `v1`. The `config` section needs a real deployed host (systemd-resolved must be running); the `network` section runs anywhere the ruleset is loaded, including a container.
+Set `FIREWALL_VERSION=v2` for a v2 host — v2 permits outbound ping, v1 drops it, and the assertion flips accordingly. The default is `v1`. The `config` section needs a real deployed host and auto-detects the platform the same way `setup.sh` does (`$ID` from `/etc/os-release`): on Ubuntu it checks systemd-resolved via `resolvectl`, on the Pi it checks the dnsmasq + stubby stack via `dig` against `127.0.0.1` (skipping the functional DNS checks if `dig`/dnsutils is absent). The `network` section runs anywhere the ruleset is loaded, including a container.
 
 CI (`.github/workflows/ci.yml`) has two jobs:
 
@@ -90,7 +90,7 @@ CI (`.github/workflows/ci.yml`) has two jobs:
 
 `check-invariants.sh` mechanically enforces the constraints above: no port 53 in any form (including inside a set, and the `domain` keyword), DoT pinned to both Quad9 IPv4 addresses and no IPv6, NTP pinned to both Cloudflare addresses, default-drop on all three chains, no inbound TCP ports, no comments in `firewall-v1/`, no `sudo` inside either script, and no stray files at the `firewall-v2/` top level. **If you change a constraint, change that script too** — otherwise CI will contradict this file.
 
-The `config` section additionally checks DNSSEC with three cases that only mean something together: a signed domain (`cloudflare.com`) must resolve, the deliberately bogus-signed `dnssec-failed.org` must be rejected *and reported as a DNSSEC failure*, and a nonexistent name under the signed `example.com` zone must come back as NXDOMAIN rather than as a validation failure. The good-domain control is what stops a resolver that fails every query from "passing" the bogus check; the NXDOMAIN case is what stops a resolver that blames DNSSEC for everything. Do not drop any one of the three. These need `systemd-resolved`, so CI does not run them.
+The `config` section additionally checks DNSSEC with three cases that only mean something together: a signed domain (`cloudflare.com`) must resolve, the deliberately bogus-signed `dnssec-failed.org` must be rejected *and reported as a DNSSEC failure*, and a nonexistent name under the signed `example.com` zone must come back as NXDOMAIN rather than as a validation failure. The good-domain control is what stops a resolver that fails every query from "passing" the bogus check; the NXDOMAIN case is what stops a resolver that blames DNSSEC for everything. Do not drop any one of the three. On Ubuntu these run through `resolvectl` (which names the DNSSEC failure in its output); the Pi mirrors the same three via `dig` against dnsmasq, where the NXDOMAIN-vs-SERVFAIL split substitutes for that explicit wording. Either way they need a deployed resolver, so CI does not run them.
 
 Several assertions are deliberately not what they look like, and should not be "simplified":
 

@@ -5,8 +5,9 @@ usage() {
     cat >&2 <<'USAGE'
 Usage: smoke-test.sh [config|network|all]
 
-  config   Host state only: systemd-resolved DoT/DNSSEC, resolv.conf, sysctls.
-           Requires a deployed host. Meaningless in a container.
+  config   Host state only: DoT/DNSSEC, resolv.conf, sysctls. Checks the DNS
+           stack for the detected platform — systemd-resolved on Ubuntu,
+           dnsmasq + stubby on the Pi. Requires a deployed host; no-op in a container.
   network  Egress policy only: what the firewall lets out and what it drops.
            Runs anywhere the ruleset is loaded, including a container.
   all      Both (default).
@@ -23,6 +24,26 @@ FIREWALL_VERSION="${FIREWALL_VERSION:-v1}"
 case "$FIREWALL_VERSION" in
     v1|v2) ;;
     *) echo "ERROR: FIREWALL_VERSION must be v1 or v2, got '${FIREWALL_VERSION}'" >&2; exit 2 ;;
+esac
+
+# Platform detection mirrors firewall-v2/setup.sh: read $ID from /etc/os-release,
+# treating Raspberry Pi OS (raspbian, or debian on Pi hardware) as "pi". This only
+# steers the config section's DNS checks — Ubuntu resolves via systemd-resolved
+# (resolvectl), the Pi via dnsmasq + stubby, which has no resolvectl at all. The
+# network section is identical on both platforms and ignores this.
+PLATFORM="unsupported"
+if [[ -r /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    . /etc/os-release
+fi
+case "${ID:-}" in
+    ubuntu)   PLATFORM="ubuntu" ;;
+    raspbian) PLATFORM="pi" ;;
+    debian)
+        if [[ -f /proc/device-tree/model ]] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
+            PLATFORM="pi"
+        fi
+        ;;
 esac
 
 PASS=0
@@ -105,21 +126,51 @@ dnssec_nxdomain_reported() {
         && ! grep -qiE 'dnssec|bogus|invalid' <<<"$out"
 }
 
-run_config() {
-    local IFACE
-    IFACE=$(ip route show default 2>/dev/null | awk 'NR==1 {print $5}')
+# --- DNSSEC validation on the Pi ---
+#
+# The Pi has no resolvectl. dnsmasq (127.0.0.1:53) does the DNSSEC validation and
+# forwards to stubby, which carries the DoT to Quad9. dig against the local
+# resolver gives the same three discriminating cases as the resolvectl path above,
+# read from the response's header status rather than resolvectl's prose:
+#
+#   good  -> NOERROR with an address   (a resolver failing every query cannot fake this)
+#   bogus -> SERVFAIL                   (dnsmasq refuses a bogus-signed zone)
+#   nxdomain -> NXDOMAIN, *not* SERVFAIL (a resolver blaming DNSSEC for everything would SERVFAIL here)
+#
+# The NXDOMAIN-vs-SERVFAIL split is what stands in for resolvectl's explicit
+# "DNSSEC" wording: it proves the SERVFAIL on the bogus zone is validation, not a
+# resolver that fails or SERVFAILs indiscriminately.
 
-    echo "=== config ==="
-    check "active interface found"                          test -n "$IFACE"
+# Header status (NOERROR / SERVFAIL / NXDOMAIN) for a query to the local resolver,
+# or empty on transport failure/timeout — which fails the good-domain control
+# rather than masquerading as a pass.
+dig_status() {
+    timeout 15 dig +time=3 +tries=1 "$@" @127.0.0.1 2>/dev/null \
+        | awk -F'status: ' '/status:/ { split($2, s, ","); print s[1]; exit }'
+}
+
+pi_dnssec_good_resolves() {
+    local out
+    out=$(timeout 15 dig +time=3 +tries=1 +short A cloudflare.com @127.0.0.1 2>/dev/null)
+    [[ -n "$out" ]]
+}
+
+pi_dnssec_bogus_rejected() {
+    [[ "$(dig_status dnssec-failed.org)" == "SERVFAIL" ]]
+}
+
+pi_dnssec_nxdomain_reported() {
+    [[ "$(dig_status "no-such-host-${RANDOM}${RANDOM}.example.com")" == "NXDOMAIN" ]]
+}
+
+# Ubuntu config DNS checks: systemd-resolved carries DoT + DNSSEC, pinned to Quad9.
+config_dns_resolved() {
+    local IFACE="$1"
     check "resolved live: DoT active on $IFACE"             bash -c "resolvectl status $IFACE | grep -q '+DNSOverTLS'"
     check "resolved live: DNSSEC active on $IFACE"          bash -c "resolvectl status $IFACE | grep -q 'DNSSEC=yes'"
     check "resolved live: 9.9.9.9 active on $IFACE"         bash -c "resolvectl status $IFACE | grep -q '9\.9\.9\.9'"
     check "resolved live: 149.112.112.112 active on $IFACE" bash -c "resolvectl status $IFACE | grep -q '149\.112\.112\.112'"
     check "resolv.conf symlink to stub"       bash -c  'readlink /etc/resolv.conf | grep -q stub-resolv'
-    check "sysctl tcp_timestamps=0"          test "$(sysctl -n net.ipv4.tcp_timestamps 2>/dev/null)"      = 0
-    check "sysctl rp_filter=1"               test "$(sysctl -n net.ipv4.conf.all.rp_filter 2>/dev/null)"  = 1
-    check "sysctl use_tempaddr=2"            test "$(sysctl -n net.ipv6.conf.all.use_tempaddr 2>/dev/null)" = 2
-    check "sysctl log_martians=1"            test "$(sysctl -n net.ipv4.conf.all.log_martians 2>/dev/null)" = 1
 
     echo "=== green: stub resolver ==="
     check "stub resolves example.com"         resolvectl query example.com
@@ -129,6 +180,55 @@ run_config() {
     check "DNSSEC: signed domain resolves (cloudflare.com)"        dnssec_good_resolves
     check "DNSSEC: bogus zone rejected (dnssec-failed.org)"        dnssec_bogus_rejected
     check "DNSSEC: nonexistent name returns NXDOMAIN, not bogus"   dnssec_nxdomain_reported
+}
+
+# Pi config DNS checks: stubby carries DoT (127.0.0.1:5300), dnsmasq does DNSSEC
+# and is the local resolver (127.0.0.1:53). No resolvectl here — assert the two
+# services are up and pinned to Quad9, resolv.conf points at the local stack, and
+# exercise DNSSEC through dnsmasq with dig. dig (dnsutils) may not be installed on a
+# minimal Pi image, so those functional checks skip cleanly when it is absent.
+config_dns_pi() {
+    check "stubby active (DoT layer)"           systemctl is-active --quiet stubby
+    check "dnsmasq active (DNSSEC + resolver)"  systemctl is-active --quiet dnsmasq
+    check "stubby pinned to 9.9.9.9"            grep -q '9\.9\.9\.9'         /etc/stubby/stubby.yml
+    check "stubby pinned to 149.112.112.112"    grep -q '149\.112\.112\.112' /etc/stubby/stubby.yml
+    check "resolv.conf points to 127.0.0.1"     grep -qE '^[[:space:]]*nameserver[[:space:]]+127\.0\.0\.1' /etc/resolv.conf
+
+    echo "=== green: local resolver (dnsmasq → stubby) ==="
+    if ! command -v dig >/dev/null 2>&1; then
+        skip "stub resolves example.com"                             "dig not installed (apt install dnsutils)"
+        skip "DNSSEC: signed domain resolves (cloudflare.com)"       "dig not installed (apt install dnsutils)"
+        skip "DNSSEC: bogus zone rejected (dnssec-failed.org)"       "dig not installed (apt install dnsutils)"
+        skip "DNSSEC: nonexistent name returns NXDOMAIN, not bogus"  "dig not installed (apt install dnsutils)"
+        return
+    fi
+
+    check "stub resolves example.com"  bash -c 'timeout 10 dig +time=3 +tries=1 +short example.com @127.0.0.1 | grep -q .'
+
+    echo "=== DNSSEC validation ==="
+    check "DNSSEC: signed domain resolves (cloudflare.com)"        pi_dnssec_good_resolves
+    check "DNSSEC: bogus zone rejected (dnssec-failed.org)"        pi_dnssec_bogus_rejected
+    check "DNSSEC: nonexistent name returns NXDOMAIN, not bogus"   pi_dnssec_nxdomain_reported
+}
+
+run_config() {
+    local IFACE
+    IFACE=$(ip route show default 2>/dev/null | awk 'NR==1 {print $5}')
+
+    echo "=== config (${PLATFORM}) ==="
+    check "active interface found"           test -n "$IFACE"
+    check "sysctl tcp_timestamps=0"          test "$(sysctl -n net.ipv4.tcp_timestamps 2>/dev/null)"      = 0
+    check "sysctl rp_filter=1"               test "$(sysctl -n net.ipv4.conf.all.rp_filter 2>/dev/null)"  = 1
+    check "sysctl use_tempaddr=2"            test "$(sysctl -n net.ipv6.conf.all.use_tempaddr 2>/dev/null)" = 2
+    check "sysctl log_martians=1"            test "$(sysctl -n net.ipv4.conf.all.log_martians 2>/dev/null)" = 1
+
+    # DNS is the one part of the config that differs by platform. Everything above
+    # is shared; the resolver stack is not.
+    if [[ "$PLATFORM" == "pi" ]]; then
+        config_dns_pi
+    else
+        config_dns_resolved "$IFACE"
+    fi
 }
 
 run_network() {
