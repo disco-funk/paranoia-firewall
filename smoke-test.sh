@@ -114,12 +114,18 @@ dnssec_good_resolves() {
     timeout 15 resolvectl query --cache=no cloudflare.com >/dev/null 2>&1
 }
 
-# A nonexistent name under the signed example.com zone. This must come back as
+# A nonexistent name under the signed iana.org zone. This must come back as
 # authenticated denial of existence (NXDOMAIN), not as a validation failure --
 # otherwise the bogus check above could be passing for the wrong reason.
+#
+# Not example.com: it is now hosted on Cloudflare, which does "compact denial of
+# existence" (returns NOERROR/NODATA with a synthesised NSEC instead of NXDOMAIN),
+# so a nonexistent name there never yields NXDOMAIN. iana.org is ICANN-operated,
+# DNSSEC-signed, uses traditional NSEC, and no third party can register a name
+# under it, so the answer is a stable authenticated NXDOMAIN.
 dnssec_nxdomain_reported() {
     local out
-    if out=$(timeout 15 resolvectl query --cache=no "no-such-host-${RANDOM}${RANDOM}.example.com" 2>&1); then
+    if out=$(timeout 15 resolvectl query --cache=no "no-such-host-${RANDOM}${RANDOM}.iana.org" 2>&1); then
         return 1
     fi
     grep -qiE "not found|nxdomain|no such" <<<"$out" \
@@ -159,8 +165,10 @@ pi_dnssec_bogus_rejected() {
     [[ "$(dig_status dnssec-failed.org)" == "SERVFAIL" ]]
 }
 
+# iana.org, not example.com: see dnssec_nxdomain_reported above — example.com is
+# Cloudflare-hosted and answers nonexistent names with NOERROR/NODATA, never NXDOMAIN.
 pi_dnssec_nxdomain_reported() {
-    [[ "$(dig_status "no-such-host-${RANDOM}${RANDOM}.example.com")" == "NXDOMAIN" ]]
+    [[ "$(dig_status "no-such-host-${RANDOM}${RANDOM}.iana.org")" == "NXDOMAIN" ]]
 }
 
 # Ubuntu config DNS checks: systemd-resolved carries DoT + DNSSEC, pinned to Quad9.
