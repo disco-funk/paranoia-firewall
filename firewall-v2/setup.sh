@@ -50,10 +50,27 @@ echo "System date/time: $(date)"
 read -r -p "If this looks wrong, press Ctrl-C now and fix with: timedatectl set-time 'YYYY-MM-DD HH:MM:SS' — otherwise press Enter to continue: "
 
 # --- Connection detection ---
-CONN=$(nmcli -g NAME,TYPE connection | awk -F : '/.*ethernet.*/ { print $1 }')
-if [[ -z "$CONN" ]]; then
+# nmcli -g emits one "NAME:TYPE" line per connection; keep the NAME of every
+# ethernet one. A host may have more than one (multiple NICs, or a stale
+# profile), so collect them into an array rather than a single string — a
+# multi-line value would be treated as one non-existent connection name and
+# every later 'nmcli connection modify' would fail.
+mapfile -t CONNS < <(nmcli -g NAME,TYPE connection | awk -F : '/.*ethernet.*/ { print $1 }')
+
+if [[ ${#CONNS[@]} -eq 0 ]]; then
     echo "ERROR: No ethernet connection found via nmcli. NetworkManager must manage the interface." >&2
     exit 1
+elif [[ ${#CONNS[@]} -eq 1 ]]; then
+    CONN="${CONNS[0]}"
+else
+    # More than one ethernet connection — let the operator pick which to harden.
+    echo "Multiple ethernet connections found. Choose which one to configure:"
+    select CONN in "${CONNS[@]}"; do
+        if [[ -n "${CONN:-}" ]]; then
+            break
+        fi
+        echo "Invalid selection — enter a number from the list."
+    done
 fi
 echo "Using connection: ${CONN}"
 
