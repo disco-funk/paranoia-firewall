@@ -112,9 +112,9 @@ sudo bash smoke-test.sh network                # egress policy only
 sudo bash smoke-test.sh config                 # host DNS/sysctl state only
 ```
 
-The `config` section needs systemd-resolved running, so it is meaningful only on a real deployed host. The `network` section runs anywhere the ruleset is loaded. `FIREWALL_VERSION` defaults to `v1`; set it to `v2` because v2 permits outbound ping where v1 drops it.
+The `config` section is meaningful only on a real deployed host. It auto-detects the platform the same way `setup.sh` does (`$ID` from `/etc/os-release`) and checks the matching DNS stack: systemd-resolved via `resolvectl` on Ubuntu, or the dnsmasq + stubby stack via `dig` against `127.0.0.1` on the Pi (which ships no `resolvectl`). The `network` section runs anywhere the ruleset is loaded. `FIREWALL_VERSION` defaults to `v1`; set it to `v2` because v2 permits outbound ping where v1 drops it.
 
-The `config` section also validates DNSSEC end to end: a signed domain must resolve, the bogus-signed `dnssec-failed.org` must be rejected *as a DNSSEC failure*, and a nonexistent name under a signed zone must return NXDOMAIN rather than a validation error. All three matter — without the first, a totally broken resolver would appear to "reject the bogus zone" correctly.
+The `config` section also validates DNSSEC end to end: a signed domain must resolve, the bogus-signed `dnssec-failed.org` must be rejected *as a DNSSEC failure*, and a nonexistent name under a signed zone must return NXDOMAIN rather than a validation error. All three matter — without the first, a totally broken resolver would appear to "reject the bogus zone" correctly. On the Pi, where `dig` reports a status code rather than prose, the NXDOMAIN-vs-SERVFAIL distinction stands in for the explicit "DNSSEC failure" wording; these functional checks skip cleanly if `dig` (dnsutils) is not installed.
 
 ### Continuous integration
 
