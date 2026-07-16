@@ -47,7 +47,22 @@ fi
 # The Pi 4 has no RTC, and an Ubuntu live boot may also carry a bad clock —
 # both run air-gapped here, so verify on every platform before anything else.
 echo "System date/time: $(date)"
-read -r -p "If this looks wrong, press Ctrl-C now and fix with: timedatectl set-time 'YYYY-MM-DD HH:MM:SS' — otherwise press Enter to continue: "
+NTP_DISABLED=false
+read -r -p "Does this look correct? [Y/n] " CLOCK_OK
+if [[ "${CLOCK_OK,,}" == n* ]]; then
+    # timedatectl refuses to set the clock manually while NTP synchronisation
+    # is active, so switch it off first. It is turned back on further down, once
+    # the network — and a real time source — is available.
+    timedatectl set-ntp off
+    NTP_DISABLED=true
+    # Loop until timedatectl accepts the entered value, so a typo re-prompts
+    # rather than aborting the whole run under 'set -e'.
+    until read -r -p "Enter the correct date and time as 'YYYY-MM-DD HH:MM:SS': " NEW_DATETIME \
+        && timedatectl set-time "$NEW_DATETIME"; do
+        echo "Could not set the time from '${NEW_DATETIME}'. Use the format YYYY-MM-DD HH:MM:SS."
+    done
+    echo "Clock set. System date/time is now: $(date)"
+fi
 
 # --- Connection detection ---
 # nmcli -g emits one "NAME:TYPE" line per connection; keep the NAME of every
@@ -189,6 +204,13 @@ echo "Waiting for DHCP..."
 until ip route show default 2>/dev/null | grep -q .; do
     sleep 1
 done
+
+# If we disabled NTP sync to set the clock by hand, re-enable it now that the
+# network is up so the daemon can correct any residual drift against Cloudflare.
+if $NTP_DISABLED; then
+    echo "Re-enabling NTP synchronisation..."
+    timedatectl set-ntp true
+fi
 
 # --- Pi bootstrap: use Python DoT proxy to install stubby, then replace it ---
 if [[ "$PLATFORM" == "pi" ]] && ! $HAS_STUBBY; then
