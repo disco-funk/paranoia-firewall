@@ -48,7 +48,11 @@ Invoke it as `sudo bash setup.sh`, not `sudo ./setup.sh`. A floppy is FAT12 and 
 
 The script elevates once rather than calling `sudo` per command. It waits on a clock confirmation and on you plugging the cable in, and a per-command `sudo` would let its credential timestamp lapse across those waits — prompting for a password after the network is live and the connectivity check is disabled.
 
-The script auto-detects the distro and active ethernet connection, deploys configs, and waits for the ethernet cable to be plugged in. It prints a status summary when done.
+The script auto-detects the distro, deploys configs, and waits for the ethernet cable to be plugged in. It prints a status summary when done.
+
+At startup it shows the current date and time and asks whether it looks right. A wrong clock breaks TLS and DNSSEC, so if you answer no, the script prompts for the correct value (`YYYY-MM-DD HH:MM:SS`) and sets it with `timedatectl` — no need to Ctrl-C out and fix it by hand. NTP synchronisation is turned off while the clock is set and re-enabled once the network is up.
+
+It also finds the ethernet connection to configure via NetworkManager. If exactly one exists it is used automatically; if more than one is present, the script lists them and asks which to configure.
 
 ## Platform behaviour
 
