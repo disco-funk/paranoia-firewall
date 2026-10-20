@@ -15,7 +15,10 @@
 
 set -euo pipefail
 
-BR="${MULTIPASS_BRIDGE:-mpqemubr0}"
+# An nft interface wildcard, not a single name. Multipass 1.17 replaced the
+# lone mpqemubr0 with one bridge per availability zone (mpqemubrzone1..3); the
+# trailing * matches either layout, and any zone bridge created later.
+BR="${MULTIPASS_BRIDGE:-mpqemubr*}"
 ACTION="${1:-apply}"
 
 if [[ $EUID -ne 0 ]]; then
@@ -28,13 +31,13 @@ if ! nft list chain inet filter output >/dev/null 2>&1; then
 	exit 1
 fi
 
-# Drop every rule in CHAIN matching PATTERN, highest handle first so earlier
-# handles stay valid as we go. Makes apply idempotent and gives us `remove` for
-# free.
+# Drop every rule in CHAIN containing the fixed string PATTERN, highest handle
+# first so earlier handles stay valid as we go. Makes apply idempotent and gives
+# us `remove` for free. Fixed-string, not regex: BR carries a literal `*`.
 purge() {
 	local chain=$1 pattern=$2 handles
 	handles=$(nft -a list chain inet filter "$chain" |
-		awk -v pat="$pattern" '$0 ~ pat && match($0, /# handle [0-9]+$/) {
+		awk -v pat="$pattern" 'index($0, pat) && match($0, /# handle [0-9]+$/) {
 			print substr($0, RSTART + 9)
 		}' | sort -rn)
 	local h
@@ -60,8 +63,14 @@ if [[ $ACTION != apply ]]; then
 	exit 1
 fi
 
-if ! ip link show "$BR" >/dev/null 2>&1; then
-	echo "bridge ${BR} not present — start multipassd first" >&2
+# nft's trailing-* wildcard and a shell glob agree, so the glob finds exactly
+# the bridges the rules will match.
+shopt -s nullglob
+# shellcheck disable=SC2206 # the glob is the point
+bridges=(/sys/class/net/$BR)
+bridges=("${bridges[@]##*/}")
+if ((${#bridges[@]} == 0)); then
+	echo "no bridge matching ${BR} — start multipassd first" >&2
 	exit 1
 fi
 
@@ -86,8 +95,11 @@ nft list chain inet filter forward | grep -q 'jump ct_base' ||
 
 nft add rule inet filter forward iifname "$BR" oifname != "$BR" tcp dport '{ 80, 443 }' counter accept
 
-subnet=$(ip -4 -o addr show dev "$BR" | awk '{print $4}')
-echo "applied ${BR} rules (${subnet:-no address})"
+echo "applied ${BR} rules"
+for b in "${bridges[@]}"; do
+	subnet=$(ip -4 -o addr show dev "$b" | awk '{print $4}')
+	echo "  ${b} (${subnet:-no address})"
+done
 
 # multipassd owns ip filter / ip mangle / ip nat, including the masquerade.
 # `flush ruleset` in nftables.conf destroys them; only a daemon restart

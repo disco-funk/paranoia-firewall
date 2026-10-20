@@ -6,7 +6,8 @@ downloads (HTTPS is already allowed) but the guest never comes up.
 ## Why
 
 `nftables-appendix.config` is the ruleset Multipass installs on a stock host,
-captured from a working Ubuntu 26.04 box. It registers base chains in
+captured from a working Ubuntu 26.04 box running Multipass < 1.17 (single
+`mpqemubr0` bridge). It registers base chains in
 `table ip filter` at the same hook and priority as `inet filter`.
 
 That does not help. A packet traverses *every* base chain on a hook, `accept`
@@ -29,7 +30,13 @@ sudo ./multipass-firewall.sh remove   # revert
 ```
 
 Idempotent — apply drops any existing rule mentioning the bridge before adding
-its own. Override the bridge with `MULTIPASS_BRIDGE=` if it is not `mpqemubr0`.
+its own.
+
+The rules match the nft interface wildcard `mpqemubr*`, not a single bridge.
+Multipass 1.17 replaced the lone `mpqemubr0` with one bridge per availability
+zone (`mpqemubrzone1`, `mpqemubrzone2`, `mpqemubrzone3`, each on its own /24);
+the wildcard covers both layouts and any zone added later. Override it with
+`MULTIPASS_BRIDGE=` (a name or an nft trailing-`*` wildcard).
 
 ## What it allows
 
@@ -48,8 +55,8 @@ DNS leaves the host, so the no-plain-DNS constraint holds. Worth confirming on
 first run: watch the `tcp dport 853` counter move while the trailing bare
 `counter` in `output` stays put.
 
-Not allowed, because a launch does not need it: guest-to-guest traffic
-(`iifname mpqemubr0 oifname mpqemubr0`), and guest NTP — cloud-init does not
+Not allowed, because a launch does not need it: guest-to-guest traffic,
+within a zone or across zones (`oifname != "mpqemubr*"`), and guest NTP — cloud-init does not
 block on the latter.
 
 ## NAT, and the flush problem
