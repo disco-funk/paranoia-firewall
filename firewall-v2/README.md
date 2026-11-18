@@ -111,6 +111,8 @@ firewall-v2/
 
 All other outbound traffic is dropped.
 
+The `@github_ips` set is a snapshot of the IPv4 entries under `git` in GitHub's [meta API](https://api.github.com/meta), which GitHub changes from time to time. When SSH to GitHub stops working, refresh it from a networked dev machine (not the target) with `bash update-github-ips.sh` at the repo root. Review the diff, then re-copy the media.
+
 ## Inbound traffic allowed
 
 | Protocol | Source | Purpose |

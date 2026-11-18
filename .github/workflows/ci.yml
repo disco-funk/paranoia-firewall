@@ -25,7 +25,7 @@ jobs:
 
       - name: shellcheck
         run: |
-          shellcheck smoke-test.sh firewall-v2/setup.sh .github/scripts/check-invariants.sh
+          shellcheck smoke-test.sh update-github-ips.sh firewall-v2/setup.sh .github/scripts/check-invariants.sh
           # SC2086 is suppressed for hardening.sh, not fixed: DOT_SERVERS holds two
           # servers that must word-split into two arguments to `resolvectl dns`.
           # The fix shellcheck suggests would break it. An inline disable directive

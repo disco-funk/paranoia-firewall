@@ -72,6 +72,8 @@ The `nftables.conf` structure has three chains in one `inet filter` table:
 3. `output` — outbound traffic policy
 4. `forward` — all-drop, no rules needed
 
+The `github_ips` set is generated, not hand-edited: `update-github-ips.sh` (repo root, deliberately outside `firewall-v2/` so it never reaches the media) rewrites only its `elements` block from the IPv4 `git` entries of `https://api.github.com/meta`, and runs `nft -c` before writing anything.
+
 ICMP is rate-limited to 10/second. IPv6 neighbour discovery and router advertisements are explicitly permitted in both input and output.
 
 ## Applying changes manually
